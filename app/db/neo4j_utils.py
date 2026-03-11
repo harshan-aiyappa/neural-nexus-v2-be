@@ -2,6 +2,7 @@ from neo4j import GraphDatabase
 import os
 from dotenv import load_dotenv
 from typing import List, Dict, Any
+from app.logging_utils import db_logger
 
 load_dotenv()
 
@@ -22,6 +23,8 @@ class Neo4jSymmetryGuardian:
         2. Symmetry Guardian check for undirected relationships.
         """
         folder_label = f"Folder_{folder_id}"
+        db_logger.info(f"Starting Guardian Ingestion for Folder: {folder_label}")
+        db_logger.info(f"Nodes to process: {len(nodes)}, Relationships to process: {len(relationships)}")
         
         with self.driver.session() as session:
             # 1. Create Nodes with Native Folder Labels
@@ -31,6 +34,8 @@ class Neo4jSymmetryGuardian:
             # 2. Create Relationships with Symmetry Guardian
             for rel in relationships:
                 session.execute_write(self._create_rel_tx, rel, folder_label)
+        
+        db_logger.info(f"Ingestion successful for label :Folder_{folder_id}")
 
     @staticmethod
     def _create_node_tx(tx, node, folder_label):

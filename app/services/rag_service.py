@@ -5,6 +5,7 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage
 from neo4j import GraphDatabase
 from dotenv import load_dotenv
+from app.logging_utils import ai_logger, db_logger
 
 load_dotenv()
 
@@ -24,6 +25,7 @@ class UndirectedRAGService:
             os.getenv("NEO4J_URI"), 
             auth=(os.getenv("NEO4J_USER"), os.getenv("NEO4J_PASSWORD"))
         )
+        ai_logger.info("Undirected RAG Service initialized with Gemini & Neo4j.")
 
     def _get_undirected_context(self, query: str) -> List[str]:
         """
@@ -31,6 +33,7 @@ class UndirectedRAGService:
         Retrieves context by traversing edges in BOTH directions -(r)-
         to eliminate retrieval blind spots (e.g., Herb -> Treats -> Disease).
         """
+        db_logger.info(f"Retrieving undirected context for query: {query}")
         # Note: In a production environment, we would use a vector search first, 
         # then expand. For this baseline, we perform a semantic keyword match expansion.
         cypher = """
