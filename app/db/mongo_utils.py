@@ -27,13 +27,17 @@ class MongoDBService:
     async def get_all_folders(self) -> List[Dict]:
         """Retrieve all scientific topics/folders."""
         db_logger.info("Fetching all folders from MongoDB")
-        collection = self.db.get_collection("folders")
-        cursor = collection.find({})
-        folders = await cursor.to_list(length=100)
-        for folder in folders:
-            folder["id"] = str(folder.pop("_id"))
-        db_logger.info(f"Retrieved {len(folders)} folders")
-        return folders
+        try:
+            collection = self.db.get_collection("folders")
+            cursor = collection.find({})
+            folders = await cursor.to_list(length=100)
+            for folder in folders:
+                folder["id"] = str(folder.pop("_id"))
+            db_logger.info(f"Retrieved {len(folders)} folders")
+            return folders
+        except Exception as e:
+            db_logger.error(f"Failed to fetch folders: {e}")
+            return []
 
     async def create_folder(self, name: str, description: str = "") -> str:
         """Initialize a new knowledge folder."""
@@ -69,30 +73,32 @@ class MongoDBService:
     async def get_recent_activity(self) -> List[Dict]:
         """Synthesize recent activity from folders and documents."""
         activities = []
-        
-        # Latest Folders
-        folder_collection = self.db.get_collection("folders")
-        folders = await folder_collection.find({}).sort("_id", -1).limit(3).to_list(length=3)
-        for f in folders:
-            activities.append({
-                "type": "Ingestion",
-                "title": f"Folder: {f['name']}",
-                "result": f"{f.get('file_count', 0)} Files",
-                "date": "Recently",
-                "color": "turf-green-3"
-            })
-            
-        # Latest Documents
-        doc_collection = self.db.get_collection("documents")
-        docs = await doc_collection.find({}).sort("_id", -1).limit(3).to_list(length=3)
-        for d in docs:
-            activities.append({
-                "type": "Extraction",
-                "title": d.get("metadata", {}).get("filename", "Untitled Document"),
-                "result": "Processed",
-                "date": "Recently",
-                "color": "jungle-teal"
-            })
+        try:
+            # Latest Folders
+            folder_collection = self.db.get_collection("folders")
+            folders = await folder_collection.find({}).sort("_id", -1).limit(3).to_list(length=3)
+            for f in folders:
+                activities.append({
+                    "type": "Ingestion",
+                    "title": f"Folder: {f['name']}",
+                    "result": f"{f.get('file_count', 0)} Files",
+                    "date": "Recently",
+                    "color": "turf-green-3"
+                })
+                
+            # Latest Documents
+            doc_collection = self.db.get_collection("documents")
+            docs = await doc_collection.find({}).sort("_id", -1).limit(3).to_list(length=3)
+            for d in docs:
+                activities.append({
+                    "type": "Extraction",
+                    "title": d.get("metadata", {}).get("filename", "Untitled Document"),
+                    "result": "Processed",
+                    "date": "Recently",
+                    "color": "jungle-teal"
+                })
+        except Exception as e:
+            db_logger.error(f"Failed to fetch recent activity: {e}")
             
         return activities
 

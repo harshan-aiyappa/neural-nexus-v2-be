@@ -65,6 +65,7 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
         raise credentials_exception
     return token_data
 
+
 class RoleChecker:
     def __init__(self, allowed_roles: List[str]):
         self.allowed_roles = allowed_roles

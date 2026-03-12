@@ -22,9 +22,13 @@ class Neo4jService:
         self.driver.close()
 
     def run_query(self, query: str, parameters: Dict[str, Any] = None):
-        with self.driver.session() as session:
-            result = session.run(query, parameters or {})
-            return [record.data() for record in result]
+        try:
+            with self.driver.session() as session:
+                result = session.run(query, parameters or {})
+                return [record.data() for record in result]
+        except Exception as e:
+            db_logger.error(f"Neo4j query failed: {e}")
+            return []
 
     def get_schema_info(self):
         """Get full schema info — labels, properties, relationships, counts."""
@@ -52,26 +56,32 @@ class Neo4jService:
 
     def get_label_counts(self):
         query = "CALL db.labels() YIELD label CALL apoc.cypher.run('MATCH (n:`' + label + '`) RETURN count(n) as count', {}) YIELD value RETURN label, value.count as count"
-        # Fallback if APOC is not available
-        try:
-            return {r["label"]: r["count"] for r in self.run_query(query)}
-        except:
-            labels = self.run_query("CALL db.labels() YIELD label RETURN label")
-            counts = {}
-            for l in labels:
-                label = l["label"]
-                count_res = self.run_query(f"MATCH (n:`{label}`) RETURN count(n) as count")
+        # Try APOC first
+        results = self.run_query(query)
+        if results:
+            return {r["label"]: r["count"] for r in results}
+            
+        # Fallback if APOC is not available or query failed
+        labels = self.run_query("CALL db.labels() YIELD label RETURN label")
+        counts = {}
+        for l in labels:
+            label = l["label"]
+            count_res = self.run_query(f"MATCH (n:`{label}`) RETURN count(n) as count")
+            if count_res:
                 counts[label] = count_res[0]["count"]
-            return counts
+        return counts
 
     def execute_cypher(self, cypher: str):
         """Execute multiple Cypher statements separated by semicolons."""
         statements = [s.strip() for s in cypher.split(";") if s.strip()]
         results = []
-        with self.driver.session() as session:
-            for statement in statements:
-                res = session.run(statement)
-                results.append(res.consume().counters.__dict__)
+        try:
+            with self.driver.session() as session:
+                for statement in statements:
+                    res = session.run(statement)
+                    results.append(res.consume().counters.__dict__)
+        except Exception as e:
+            db_logger.error(f"Neo4j execute_cypher failed: {e}")
         return {"results": results, "statement_count": len(statements)}
 
     def get_full_graph_bidirectional(self, limit_nodes=500, limit_rels=1000, folder_slug: str = None):

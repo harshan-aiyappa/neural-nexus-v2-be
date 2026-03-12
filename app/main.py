@@ -19,9 +19,15 @@ async def lifespan(app: FastAPI):
         neo4j_service.verify_connectivity()
         logger.info("[OK] Neo4j connection verified")
         
-        # Verify Mongo (Async)
-        await mongo_service.client.admin.command('ping')
-        logger.info("[OK] MongoDB connection verified")
+        # Verify Mongo (Async) - short timeout to not hang startup
+        try:
+            from pymongo.errors import ServerSelectionTimeoutError
+            # We don't want to wait 30s for a failure
+            await mongo_service.client.admin.command('ping', serverSelectionTimeoutMS=2000)
+            logger.info("[OK] MongoDB connection verified")
+        except Exception as mongo_err:
+            logger.warning(f"[WARN] MongoDB unreachable (Guest Mode active): {mongo_err}")
+
     except Exception as e:
         logger.error(f"[WARN] Database connection failed: {e}")
     yield

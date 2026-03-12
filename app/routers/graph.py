@@ -27,9 +27,14 @@ async def get_stats():
         total_rels_result = neo4j_service.run_query("MATCH ()-[r]->() RETURN count(r) AS count")
         total_rels = total_rels_result[0]["count"] if total_rels_result else 0
         
-        # Mongo Counts
-        folder_count = await mongo_service.db.get_collection("folders").count_documents({})
-        doc_count = await mongo_service.db.get_collection("documents").count_documents({})
+        # Mongo Counts with error handling
+        try:
+            folder_count = await mongo_service.db.get_collection("folders").count_documents({})
+            doc_count = await mongo_service.db.get_collection("documents").count_documents({})
+        except Exception as e:
+            print(f"MongoDB counts failed: {e}")
+            folder_count = 0
+            doc_count = 0
         
         # Dynamic Integrity
         sym_res = neo4j_service.run_query("MATCH (a)-[r]->(b) WHERE r.isSymmetric = true RETURN count(r) AS count")
