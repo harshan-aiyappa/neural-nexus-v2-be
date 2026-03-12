@@ -14,6 +14,7 @@ class RAGState(TypedDict):
     context: List[str]
     answer: str
     history: List[BaseMessage]
+    folder_slug: str # Added for semantic isolation
 
 class UndirectedRAGService:
     def __init__(self):
@@ -21,42 +22,38 @@ class UndirectedRAGService:
             model=os.getenv("GEMINI_MODEL", "gemini-2.5-flash"),
             google_api_key=os.getenv("GEMINI_API_KEY")
         )
-        self.driver = GraphDatabase.driver(
-            os.getenv("NEO4J_URI"), 
-            auth=(os.getenv("NEO4J_USER"), os.getenv("NEO4J_PASSWORD"))
-        )
-        ai_logger.info("Undirected RAG Service initialized with Gemini & Neo4j.")
+        ai_logger.info("Undirected RAG Service initialized with Gemini & Neo4j Service.")
 
-    def _get_undirected_context(self, query: str) -> List[str]:
+    def _get_undirected_context(self, query: str, folder_slug: str = None) -> List[str]:
         """
-        Master Discovery Standard: 
-        Retrieves context by traversing edges in BOTH directions -(r)-
-        to eliminate retrieval blind spots (e.g., Herb -> Treats -> Disease).
+        Retrieves context by traversing edges in BOTH directions.
+        Uses semantic folder label for FAST indexing and isolation if provided.
         """
-        db_logger.info(f"Retrieving undirected context for query: {query}")
-        # Note: In a production environment, we would use a vector search first, 
-        # then expand. For this baseline, we perform a semantic keyword match expansion.
-        cypher = """
-        MATCH (n)
+        from app.services.neo4j_service import neo4j_service
+        
+        db_logger.info(f"Retrieving undirected context for: {query} (Folder: {folder_slug})")
+        
+        # If folder_slug provided, restrict to :Folder_<SLUG> for extreme speed
+        folder_label_clause = f":Folder_{folder_slug}" if folder_slug else ""
+        
+        cypher = f"""
+        MATCH (n{folder_label_clause})
         WHERE n.id CONTAINS $keyword OR n.id =~ $regex
         MATCH (n)-[r]-(m)
-        RETURN n.id + ' ' + type(r) + ' ' + m.id as relationship, 
-               properties(n) as head_props, 
-               properties(m) as tail_props
+        RETURN n.id + ' ' + type(r) + ' ' + m.id as relationship
         LIMIT 50
         """
-        keyword = query.split()[-1] # Simple keyword extraction for baseline
+        keyword = query.split()[-1]
         regex = f"(?i).*{keyword}.*"
         
         context = []
-        with self.driver.session() as session:
-            result = session.run(cypher, keyword=keyword, regex=regex)
-            for record in result:
-                context.append(record["relationship"])
+        result = neo4j_service.run_query(cypher, {"keyword": keyword, "regex": regex})
+        for record in result:
+            context.append(record["relationship"])
         return context
 
     async def chat_node(self, state: RAGState):
-        context = self._get_undirected_context(state['query'])
+        context = self._get_undirected_context(state['query'], state.get('folder_slug'))
         context_str = "\n".join(context)
         
         prompt = f"""

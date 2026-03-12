@@ -1,7 +1,6 @@
 import pandas as pd
 import asyncio
-from app.services.gemini_service import gemini_service
-from app.db.neo4j_utils import db_guardian
+from app.services.neo4j_service import neo4j_service
 from app.logging_utils import ai_logger, db_logger
 import os
 
@@ -56,7 +55,7 @@ class ExcelIngestionService:
                 
                 if nodes or relationships:
                     # Ingest into Neo4j
-                    await db_guardian.merge_entities_with_guardian(nodes, relationships, folder_id)
+                    await neo4j_service.merge_entities_with_guardian(nodes, relationships, folder_id)
                     total_nodes += len(nodes)
                     total_rels += len(relationships)
                     ai_logger.info(f"Batch {i//batch_size + 1} ingested: {len(nodes)} nodes, {len(relationships)} rels")

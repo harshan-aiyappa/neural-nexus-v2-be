@@ -10,7 +10,7 @@ load_dotenv()
 class GeminiService:
     def __init__(self):
         api_key = os.getenv("GEMINI_API_KEY")
-        model_name = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
+        model_name = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
         
         if not api_key:
             raise ValueError("GEMINI_API_KEY not found in environment variables")
@@ -58,5 +58,37 @@ class GeminiService:
         except Exception as e:
             ai_logger.error(f"Error during Gemini extraction: {e}")
             return {"nodes": [], "relationships": []}
+
+    async def generate_embeddings_batch(self, texts: List[str]) -> List[List[float]]:
+        """
+        Generates embeddings for a batch of texts using text-embedding-004.
+        """
+        try:
+            if not texts: return []
+            ai_logger.info(f"Generating embeddings for batch of {len(texts)} texts...")
+            result = self.client.models.embed_content(
+                model='text-embedding-004',
+                contents=texts
+            )
+            # Assuming newest client returns a list of embeddings.
+            embeddings = [emb.values for emb in result.embeddings]
+            return embeddings
+        except Exception as e:
+            ai_logger.error(f"Error generating embeddings batch: {e}")
+            return []
+
+    async def generate_response(self, user_prompt: str, system_prompt: str) -> str:
+        """Generates a response using Gemini for RAG or Chat."""
+        ai_logger.info(f"Generating RAG response using {self.model_name}")
+        try:
+            combined_prompt = f"SYSTEM INSTRUCTIONS:\n{system_prompt}\n\nUSER PROMPT:\n{user_prompt}"
+            response = self.client.models.generate_content(
+                model=self.model_name,
+                contents=combined_prompt
+            )
+            return response.text
+        except Exception as e:
+            ai_logger.error(f"Error generating Gemini response: {e}")
+            return "I apologize, but I am currently unable to process your request."
 
 gemini_service = GeminiService()

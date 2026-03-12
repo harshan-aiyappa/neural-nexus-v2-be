@@ -24,7 +24,7 @@ class MongoDBService:
         result = await collection.insert_one(document)
         return str(result.inserted_id)
 
-    async def get_folders(self) -> List[Dict]:
+    async def get_all_folders(self) -> List[Dict]:
         """Retrieve all scientific topics/folders."""
         db_logger.info("Fetching all folders from MongoDB")
         collection = self.db.get_collection("folders")
@@ -65,5 +65,35 @@ class MongoDBService:
             "response": response,
             "timestamp": "..." # Replace with actual timestamp logic if needed
         })
+
+    async def get_recent_activity(self) -> List[Dict]:
+        """Synthesize recent activity from folders and documents."""
+        activities = []
+        
+        # Latest Folders
+        folder_collection = self.db.get_collection("folders")
+        folders = await folder_collection.find({}).sort("_id", -1).limit(3).to_list(length=3)
+        for f in folders:
+            activities.append({
+                "type": "Ingestion",
+                "title": f"Folder: {f['name']}",
+                "result": f"{f.get('file_count', 0)} Files",
+                "date": "Recently",
+                "color": "turf-green-3"
+            })
+            
+        # Latest Documents
+        doc_collection = self.db.get_collection("documents")
+        docs = await doc_collection.find({}).sort("_id", -1).limit(3).to_list(length=3)
+        for d in docs:
+            activities.append({
+                "type": "Extraction",
+                "title": d.get("metadata", {}).get("filename", "Untitled Document"),
+                "result": "Processed",
+                "date": "Recently",
+                "color": "jungle-teal"
+            })
+            
+        return activities
 
 mongo_service = MongoDBService()
