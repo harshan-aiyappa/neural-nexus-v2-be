@@ -1,6 +1,9 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
+from dotenv import load_dotenv
+load_dotenv()
+
 import logging
 
 from app.routers import auth, graph, ingest, chat, folders
