@@ -12,7 +12,7 @@ researcher_only = Depends(RoleChecker(["ADMIN", "RESEARCHER"]))
 async def get_folders():
     from app.services.neo4j_service import neo4j_service
     folders = await mongo_service.get_all_folders()
-    counts = neo4j_service.get_folder_node_counts()
+    counts = await neo4j_service.get_folder_node_counts()
     
     for folder in folders:
         # Use semantic slug to match node counts

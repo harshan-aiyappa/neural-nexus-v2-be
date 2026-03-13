@@ -24,7 +24,7 @@ class UndirectedRAGService:
         )
         ai_logger.info("Undirected RAG Service initialized with Gemini & Neo4j Service.")
 
-    def _get_undirected_context(self, query: str, folder_slug: str = None) -> List[str]:
+    async def _get_undirected_context(self, query: str, folder_slug: str = None) -> List[str]:
         """
         Retrieves context by traversing edges in BOTH directions.
         Uses semantic folder label for FAST indexing and isolation if provided.
@@ -47,13 +47,13 @@ class UndirectedRAGService:
         regex = f"(?i).*{keyword}.*"
         
         context = []
-        result = neo4j_service.run_query(cypher, {"keyword": keyword, "regex": regex})
+        result = await neo4j_service.run_query(cypher, {"keyword": keyword, "regex": regex})
         for record in result:
             context.append(record["relationship"])
         return context
 
     async def chat_node(self, state: RAGState):
-        context = self._get_undirected_context(state['query'], state.get('folder_slug'))
+        context = await self._get_undirected_context(state['query'], state.get('folder_slug'))
         context_str = "\n".join(context)
         
         prompt = f"""

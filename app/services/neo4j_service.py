@@ -1,6 +1,7 @@
-from neo4j import GraphDatabase
+from neo4j import AsyncGraphDatabase
 import os
-from typing import List, Dict, Any
+import re
+from typing import List, Dict, Any, Optional
 from app.logging_utils import db_logger
 
 class Neo4jService:
@@ -8,40 +9,56 @@ class Neo4jService:
         uri = os.getenv("NEO4J_URI", "bolt://localhost:7687")
         user = os.getenv("NEO4J_USER", "neo4j")
         password = os.getenv("NEO4J_PASSWORD")
-        self.driver = GraphDatabase.driver(uri, auth=(user, password))
+        self.driver = AsyncGraphDatabase.driver(uri, auth=(user, password))
 
     def slugify_folder(self, name: str) -> str:
         """Standardized slugification matching seed_db.py."""
-        import re
         return re.sub(r'[\W_]+', '_', name).upper()
 
-    def verify_connectivity(self):
-        self.driver.verify_connectivity()
+    async def verify_connectivity(self):
+        await self.driver.verify_connectivity()
 
-    def close(self):
-        self.driver.close()
+    async def close(self):
+        await self.driver.close()
 
-    def run_query(self, query: str, parameters: Dict[str, Any] = None):
+    async def run_query(self, query: str, parameters: Optional[Dict[str, Any]] = None):
+        """
+        Execute a read query using a retriable transaction function.
+        Best practice for production environments.
+        """
+        async def _read_tx(tx):
+            result = await tx.run(query, parameters or {})
+            records = await result.data()
+            return records
+
         try:
-            with self.driver.session() as session:
-                result = session.run(query, parameters or {})
-                return [record.data() for record in result]
+            async with self.driver.session() as session:
+                return await session.execute_read(_read_tx)
         except Exception as e:
-            db_logger.error(f"Neo4j query failed: {e}")
+            db_logger.error(f"Neo4j read query failed: {e}")
             return []
 
-    def get_schema_info(self):
+    async def setup_constraints(self):
+        """Pre-configure Neo4j with uniqueness constraints for performance and integrity."""
+        db_logger.info("Configuring Neo4j indices and constraints...")
+        # Constraint on base label for global ID lookup
+        await self.execute_cypher("CREATE CONSTRAINT nexus_node_id IF NOT EXISTS FOR (n:NexusNode) REQUIRE n.id IS UNIQUE")
+        # Indices for common search properties
+        await self.execute_cypher("CREATE INDEX node_name_idx IF NOT EXISTS FOR (n:NexusNode) ON (n.name)")
+        db_logger.info("Neo4j constraints configured.")
+
+    async def get_schema_info(self):
         """Get full schema info — labels, properties, relationships, counts."""
-        labels = self.run_query("CALL db.labels() YIELD label RETURN label")
-        rels = self.run_query("CALL db.relationshipTypes() YIELD relationshipType RETURN relationshipType")
+        labels = await self.run_query("CALL db.labels() YIELD label RETURN label")
+        rels = await self.run_query("CALL db.relationshipTypes() YIELD relationshipType RETURN relationshipType")
         
-        node_props = self.run_query("""
+        node_props = await self.run_query("""
             CALL db.schema.nodeTypeProperties() 
             YIELD nodeType, propertyName 
             RETURN nodeType, collect(propertyName) as properties
         """)
         
-        rel_props = self.run_query("""
+        rel_props = await self.run_query("""
             CALL db.schema.relTypeProperties() 
             YIELD relType, propertyName 
             RETURN relType, collect(propertyName) as properties
@@ -54,56 +71,71 @@ class Neo4jService:
             "relationship_properties": {p["relType"]: p["properties"] for p in rel_props}
         }
 
-    def get_label_counts(self):
-        query = "CALL db.labels() YIELD label CALL apoc.cypher.run('MATCH (n:`' + label + '`) RETURN count(n) as count', {}) YIELD value RETURN label, value.count as count"
-        # Try APOC first
-        results = self.run_query(query)
-        if results:
-            return {r["label"]: r["count"] for r in results}
+    async def get_label_counts(self):
+        """Get counts for all labels using a standard loop (avoiding APOC dependency)."""
+        labels_raw = await self.run_query("CALL db.labels() YIELD label RETURN label")
+        if not labels_raw:
+            return {}
             
-        # Fallback if APOC is not available or query failed
-        labels = self.run_query("CALL db.labels() YIELD label RETURN label")
         counts = {}
-        for l in labels:
+        for l in labels_raw:
             label = l["label"]
-            count_res = self.run_query(f"MATCH (n:`{label}`) RETURN count(n) as count")
+            # Fast count using COUNT {} subquery if supported, else MATCH
+            count_res = await self.run_query(f"MATCH (n:`{label}`) RETURN count(n) as count")
             if count_res:
                 counts[label] = count_res[0]["count"]
         return counts
 
-    def execute_cypher(self, cypher: str):
-        """Execute multiple Cypher statements separated by semicolons."""
+    async def execute_cypher(self, cypher: str):
+        """Execute multiple Cypher statements using a retriable write transaction."""
         statements = [s.strip() for s in cypher.split(";") if s.strip()]
-        results = []
+        
+        async def _write_tx(tx):
+            tx_results = []
+            for statement in statements:
+                res = await tx.run(statement)
+                consume_res = await res.consume()
+                tx_results.append(consume_res.counters.__dict__)
+            return tx_results
+
         try:
-            with self.driver.session() as session:
-                for statement in statements:
-                    res = session.run(statement)
-                    results.append(res.consume().counters.__dict__)
+            async with self.driver.session() as session:
+                final_results = await session.execute_write(_write_tx)
+                return {"results": final_results, "statement_count": len(statements)}
         except Exception as e:
             db_logger.error(f"Neo4j execute_cypher failed: {e}")
-        return {"results": results, "statement_count": len(statements)}
+            return {"results": [], "statement_count": 0}
 
-    def get_full_graph_bidirectional(self, limit_nodes=500, limit_rels=1000, folder_slug: str = None):
-        """Fetch graph data and collapse symmetric relationships. Supports label-based isolation."""
+    async def execute_cypher_scoped(self, cypher: str, folder_id: str):
+        """
+        Execute Cypher while enforcing Native Label Scoping and NexusNode base label.
+        """
+        folder_label = f"Folder_{folder_id}"
+        # Inject labels into node patterns (e.g., (n:Herb))
+        scoped_cypher = re.sub(r'\(([\w\d]+)(:[\w\d:]+)?', r'(\1\2:NexusNode:`' + folder_label + '`', cypher)
+        return await self.execute_cypher(scoped_cypher)
+
+    async def get_full_graph_bidirectional(self, limit_nodes: int = 500, limit_rels: int = 1000, folder_slug: Optional[str] = None):
+        """Fetch graph data with elementId and symmetric relationship collapsing."""
         label_filter = f":Folder_{folder_slug}" if folder_slug else ""
         
-        nodes_res = self.run_query(f"MATCH (n{label_filter}) RETURN elementId(n) AS id, labels(n)[0] AS label, coalesce(n.name, n.id, 'Unnamed') AS name, properties(n) AS properties LIMIT {limit_nodes}")
+        nodes_res = await self.run_query(f"""
+            MATCH (n{label_filter}) 
+            RETURN elementId(n) AS id, labels(n)[0] AS label, coalesce(n['name'], n['id'], 'Unnamed') AS name, properties(n) AS properties 
+            LIMIT {limit_nodes}
+        """)
         
-        # Fetch relationships — ensure they are linked to filtered nodes
-        rel_query = f"MATCH (a{label_filter})-[r]->(b{label_filter}) RETURN elementId(a) AS source_id, elementId(b) AS target_id, type(r) AS type, properties(r) AS properties, elementId(r) AS id LIMIT {limit_rels}"
-        rels_res = self.run_query(rel_query)
+        rel_query = f"MATCH (a{label_filter})-[r]->(b{label_filter}) RETURN elementId(a) AS source, elementId(b) AS target, type(r) AS type, properties(r) AS properties, elementId(r) AS id LIMIT {limit_rels}"
+        rels_res = await self.run_query(rel_query)
         
         processed_rels = []
         seen_pairs = set()
 
         for rel in rels_res:
-            s, t, rtype = rel['source_id'], rel['target_id'], rel['type']
-            # Create a sorted pair key to identify reverse edges
+            s, t, rtype = rel['source'], rel['target'], rel['type']
             pair = tuple(sorted([s, t])) + (rtype,)
             
             if pair in seen_pairs:
-                # If we've seen this pair and type before, mark the existing one as symmetric
                 for p_rel in processed_rels:
                     if (tuple(sorted([p_rel['source'], p_rel['target']])) + (p_rel['type'],)) == pair:
                         p_rel['isSymmetric'] = True
@@ -122,86 +154,73 @@ class Neo4jService:
 
         return {"nodes": nodes_res, "relationships": processed_rels}
 
-    def get_folder_node_counts(self):
-        """Get node counts for all folders by scanning Folder_ labels."""
+    async def get_folder_node_counts(self):
+        """Get node counts for all folders using efficient partial label scan."""
         query = """
         MATCH (n)
         UNWIND labels(n) as label
         WITH label WHERE label STARTS WITH 'Folder_'
         RETURN label, count(*) as count
         """
-        results = self.run_query(query)
-        # Convert List[Dict] to Dict { "folder_id": count }
-        counts = {}
-        for r in results:
-            fid = r['label'].replace("Folder_", "")
-            counts[fid] = r['count']
-        return counts
+        results = await self.run_query(query)
+        res_counts = {r['label'].replace("Folder_", ""): r['count'] for r in results}
+        return res_counts
 
-    # Symmetry Guardian methods ported from old utils
     async def merge_entities_with_guardian(self, nodes: List[Dict], relationships: List[Dict], folder_id: str):
+        """Ingest nodes and relationships with label scoping inside a single transaction function."""
         folder_label = f"Folder_{folder_id}"
-        with self.driver.session() as session:
+        
+        async def _ingest_tx(tx):
             for node in nodes:
-                session.execute_write(self._create_node_tx, node, folder_label)
+                # Merge on base labels and ID
+                q = f"MERGE (n:NexusNode:`{node['label']}`:`{folder_label}` {{id: $id}}) SET n += $props"
+                await tx.run(q, id=node['id'], props=node.get('properties', {}))
+            
             for rel in relationships:
-                session.execute_write(self._create_rel_tx, rel, folder_label)
+                is_sym = rel.get('properties', {}).get('isSymmetric', False)
+                if is_sym:
+                    # Direct check to prevent duplicates in symmetric sets
+                    check_q = f"MATCH (a:`{folder_label}` {{id: $t}})-[r:`{rel['type']}`]-(b:`{folder_label}` {{id: $s}}) RETURN r"
+                    chk = await tx.run(check_q, s=rel['source'], t=rel['target'])
+                    if await chk.peek(): continue
+                
+                # Directed merge
+                q = f"""
+                MATCH (a:`{folder_label}` {{id: $s}}), (b:`{folder_label}` {{id: $t}}) 
+                MERGE (a)-[r:`{rel['type']}`]->(b) 
+                SET r += $props
+                """
+                await tx.run(q, s=rel['source'], t=rel['target'], props=rel.get('properties', {}))
 
-    @staticmethod
-    def _create_node_tx(tx, node, folder_label):
-        query = f"MERGE (n:`{node['label']}` {{id: $id}}) SET n += $properties SET n:`{folder_label}`"
-        tx.run(query, id=node['id'], properties=node.get('properties', {}))
+        try:
+            async with self.driver.session() as session:
+                await session.execute_write(_ingest_tx)
+        except Exception as e:
+            db_logger.error(f"Symmetry Guardian ingestion failed: {e}")
 
-    @staticmethod
-    def _create_rel_tx(tx, rel, folder_label):
-        is_symmetric = rel.get('properties', {}).get('isSymmetric', False)
-        if is_symmetric:
-            check_query = f"MATCH (a {{id: $target}})-[r:`{rel['type']}`]-(b {{id: $source}}) RETURN r"
-            result = tx.run(check_query, source=rel['source'], target=rel['target'])
-            if result.peek(): return
-        query = f"MATCH (a {{id: $source}}), (b {{id: $target}}) MERGE (a)-[r:`{rel['type']}`]->(b) SET r += $properties"
-        tx.run(query, source=rel['source'], target=rel['target'], properties=rel.get('properties', {}))
-
-    async def process_embeddings_batch(self, folder_id: str = None):
-        """Asynchronously processes nodes missing embeddings in batches. Can be restricted to a folder."""
+    async def process_embeddings_batch(self, folder_id: Optional[str] = None):
+        """Asynchronously processes nodes missing embeddings in batches."""
         from app.services.gemini_service import gemini_service
         import asyncio
         batch_size = 500
-        
-        db_logger.info(f"Starting background embedding pipeline for folder: {folder_id or 'ALL'}")
-        
         folder_match = f":Folder_{folder_id}" if folder_id else ""
         
         while True:
-            # Fetch nodes missing embeddings
+            # elementId usage for precision
             query = f"""
             MATCH (n{folder_match}) 
-            WHERE n.embedding IS NULL AND n.name IS NOT NULL
-            RETURN id(n) as node_id, coalesce(n.name, '') + ' ' + coalesce(n.description, '') as text_to_embed
+            WHERE n['embedding'] IS NULL AND n['name'] IS NOT NULL
+            RETURN elementId(n) as node_id, coalesce(n['name'], '') + ' ' + coalesce(n['description'], '') as text
             LIMIT {batch_size}
             """
-            nodes = self.run_query(query)
-            if not nodes:
-                db_logger.info("All eligible nodes embedded successfully.")
-                break
+            batch_nodes = await self.run_query(query)
+            if not batch_nodes or not isinstance(batch_nodes, list): break
                 
-            db_logger.info(f"Processing embedding batch of {len(nodes)} nodes...")
-            texts = [n['text_to_embed'] for n in nodes]
-            embeddings = await gemini_service.generate_embeddings_batch(texts)
-            
-            if not embeddings or len(embeddings) != len(nodes):
-                db_logger.error("Failed to generate complete embeddings. Aborting batch loop.")
-                break
+            embeddings = await gemini_service.generate_embeddings_batch([n['text'] for n in batch_nodes])
+            if not embeddings: break
                 
-            updates = [{"id": nodes[i]['node_id'], "embedding": embeddings[i]} for i in range(len(nodes))]
-            
-            update_query = """
-            UNWIND $updates AS row
-            MATCH (n) WHERE id(n) = row.id
-            SET n.embedding = row.embedding
-            """
-            self.run_query(update_query, {"updates": updates})
-            db_logger.info(f"Successfully saved {len(updates)} embeddings to Neo4j.")
-            await asyncio.sleep(2) # Prevent Gemini API rate limit throttling
+            updates = [{"id": batch_nodes[i]['node_id'], "emb": embeddings[i]} for i in range(len(batch_nodes))]
+            await self.run_query("UNWIND $upd AS row MATCH (n) WHERE elementId(n) = row.id SET n.embedding = row.emb", {"upd": updates})
+            await asyncio.sleep(1)
 
 neo4j_service = Neo4jService()

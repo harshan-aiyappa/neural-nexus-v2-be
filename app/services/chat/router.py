@@ -3,8 +3,7 @@ from app.models.schemas import ChatRequest
 from app.core.security import get_current_user
 from app.logging_utils import ai_logger
 from app.services.chat.enhanced_rag import enhanced_rag_service
-# Analytics chat will be imported here later
-# from app.services.chat.analytic_chat import analytic_chat_service
+from app.services.chat.analytic_chat import analytic_chat_service
 
 router = APIRouter()
 
@@ -25,15 +24,7 @@ async def chat_with_nexus(request: ChatRequest):
     
     try:
         if is_analytics:
-            # Placeholder for Analytics Chat
-            # response = await analytic_chat_service.analyze(request.message, request.context_folder)
-            
-            # Temporarily fallback to RAG until analytic_chat is fully implemented
-            ai_logger.info("Routing to Analytics Engine (Fallback to RAG temporarily)")
-            response = await enhanced_rag_service.chat(
-                user_query=request.message,
-                folder_slug=request.context_folder
-            )
+            response = await analytic_chat_service.analyze(request.message, request.context_folder)
         else:
             ai_logger.info("Routing to Enhanced RAG Engine")
             response = await enhanced_rag_service.chat(

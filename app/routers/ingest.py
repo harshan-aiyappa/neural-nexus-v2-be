@@ -1,78 +1,80 @@
-from fastapi import APIRouter, UploadFile, File, HTTPException, Depends, BackgroundTasks
-from app.models.schemas import IngestionRequest
+import io
+import pandas as pd
+import logging
+from fastapi import APIRouter, UploadFile, File, HTTPException, Depends, BackgroundTasks, Form
+from pydantic import BaseModel
+from app.models.schemas import IngestionRequest, ExtractionRequest
 from app.services.neo4j_service import neo4j_service
 from app.services.excel_service import excel_service
-from app.core.security import get_current_user, RoleChecker
+from app.services.gemini_service import gemini_service
+from app.core.security import get_current_user
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
-# Only Researchers and Admins can ingest data
-researcher_only = Depends(RoleChecker(["ADMIN", "RESEARCHER"]))
-
-def clean_cypher(cypher_text: str) -> str:
-    """Removes comments and empty lines from Cypher scripts to prevent parser errors."""
-    lines = cypher_text.splitlines()
-    cleaned_lines = []
-    for line in lines:
-        stripped = line.strip()
-        if stripped.startswith("//") or not stripped:
-            continue
-        cleaned_lines.append(line)
-    return "\n".join(cleaned_lines)
-
-@router.post("/excel/{folder_id}")
-async def ingest_excel(folder_id: str, file: UploadFile = File(...), _=researcher_only):
-    """Scientific Excel ingestion with Symmetry Guardian."""
-    try:
-        content = await file.read()
-        import io
-        import pandas as pd
-        df = pd.read_excel(io.BytesIO(content))
-        result = await excel_service.process_and_ingest(df, folder_id)
-        return {"success": True, "details": result}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@router.post("/cypher", dependencies=[researcher_only])
-async def run_cypher(request: dict, background_tasks: BackgroundTasks):
-    """Execute raw Cypher query (Zip feature)."""
-    try:
-        cypher = request.get("cypher")
-        folder_id = request.get("folder_id")
-        if not cypher or not folder_id:
-            raise HTTPException(status_code=400, detail="Cypher query and folder_id are required")
-        cleaned_cypher = clean_cypher(cypher)
-        result = neo4j_service.execute_cypher(cleaned_cypher)
-        
-        # Tag newly created or modified nodes with the folder
-        neo4j_service.run_query(f"MATCH (n) WHERE NOT n:Folder_{folder_id} SET n:Folder_{folder_id}")
-        
-        # Trigger background embedding task specifically for this folder
-        background_tasks.add_task(neo4j_service.process_embeddings_batch, folder_id)
-        
-        return {"success": True, "result": result}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-from fastapi import Form
-@router.post("/upload-cypher", dependencies=[researcher_only])
-async def upload_cypher(background_tasks: BackgroundTasks, file: UploadFile = File(...), folder_id: str = Form(...)):
-    """Upload .cypher file (Zip feature)."""
-    if not file.filename.endswith((".cypher", ".txt")):
-        raise HTTPException(status_code=400, detail="Invalid file type")
+@router.post("/upload-cypher")
+async def upload_cypher(
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
+    folder_id: str = Form(...),
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Upload a .cypher file and execute it in a specific folder context.
+    Uses label-scoping to isolate the data.
+    """
+    if not file.filename.endswith('.cypher'):
+        raise HTTPException(status_code=400, detail="Only .cypher files are supported")
     
     content = await file.read()
-    cypher = content.decode("utf-8")
+    cypher_text = content.decode('utf-8')
+    
+    # Process in background to prevent timeout
+    background_tasks.add_task(
+        neo4j_service.execute_cypher_scoped, 
+        cypher_text, 
+        folder_id
+    )
+    
+    return {"status": "Processing", "filename": file.filename, "folder": folder_id}
+
+@router.post("/extract")
+async def extract_knowledge(request: ExtractionRequest, current_user: dict = Depends(get_current_user)):
+    """Extract entities and relationships from raw text using LLM."""
     try:
-        cleaned_cypher = clean_cypher(cypher)
-        result = neo4j_service.execute_cypher(cleaned_cypher)
-        
-        # Tag newly created or modified nodes with the folder
-        neo4j_service.run_query(f"MATCH (n) WHERE NOT n:Folder_{folder_id} SET n:Folder_{folder_id}")
-        
-        # Trigger background embedding task
-        background_tasks.add_task(neo4j_service.process_embeddings_batch, folder_id)
-        
-        return {"success": True, "filename": file.filename, "result": result}
+        result = await gemini_service.extract_graph(request.text)
+        return result
     except Exception as e:
+        logger.error(f"Extraction error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/ingest")
+async def ingest_knowledge(request: IngestionRequest, current_user: dict = Depends(get_current_user)):
+    """Ingest nodes and relationships into a folder with Symmetry Guardian protection."""
+    try:
+        await neo4j_service.merge_entities_with_guardian(
+            request.nodes, 
+            request.relationships, 
+            request.folder_id
+        )
+        return {"status": "Success", "nodes": len(request.nodes), "rels": len(request.relationships)}
+    except Exception as e:
+        logger.error(f"Ingestion error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/excel")
+async def ingest_excel(
+    file: UploadFile = File(...),
+    folder_id: str = Form(...),
+    current_user: dict = Depends(get_current_user)
+):
+    """Ingest structured data from Excel/CSV."""
+    if not file.filename.endswith(('.xlsx', '.csv')):
+        raise HTTPException(status_code=400, detail="Unsupported file format")
+    
+    content = await file.read()
+    df = pd.read_excel(io.BytesIO(content)) if file.filename.endswith('.xlsx') else pd.read_csv(io.BytesIO(content))
+    
+    # Use Excel service for complex mapping
+    result = await excel_service.process_and_ingest(df, folder_id)
+    return {"status": "Success", "details": result}

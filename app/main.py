@@ -6,7 +6,7 @@ load_dotenv()
 
 import logging
 
-from app.routers import auth, graph, ingest, chat, folders
+from app.routers import auth, graph, ingest, chat, folders, settings, analytics
 from app.services import neo4j_service
 from app.db.mongo_utils import mongo_service
 from app.logging_utils import logger
@@ -16,8 +16,9 @@ async def lifespan(app: FastAPI):
     """Application lifecycle — verify connectivity on startup."""
     try:
         # Verify Neo4j
-        neo4j_service.verify_connectivity()
-        logger.info("[OK] Neo4j connection verified")
+        await neo4j_service.verify_connectivity()
+        await neo4j_service.setup_constraints()
+        logger.info("[OK] Neo4j connection and constraints verified")
         
         # Verify Mongo (Async) - short timeout to not hang startup
         try:
@@ -32,7 +33,7 @@ async def lifespan(app: FastAPI):
         logger.error(f"[WARN] Database connection failed: {e}")
     yield
     # Shutdown
-    neo4j_service.close()
+    await neo4j_service.close()
     logger.info("[OK] Database connections closed")
 
 app = FastAPI(
@@ -66,4 +67,5 @@ app.include_router(folders.router, prefix="/api/folders", tags=["Folders"])
 app.include_router(graph.router, prefix="/api/graph", tags=["Graph"])
 app.include_router(chat.router, prefix="/api/chat", tags=["Chat"])
 app.include_router(ingest.router, prefix="/api/ingest", tags=["Ingest"])
- 
+app.include_router(settings.router, prefix="/api/settings", tags=["Settings"])
+app.include_router(analytics.router, prefix="/api/analytics", tags=["Analytics"])
