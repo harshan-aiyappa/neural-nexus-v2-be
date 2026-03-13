@@ -44,8 +44,6 @@ class GeminiService:
         """
 
         try:
-            # Use sync call for now if async is tricky with the new client in this context, 
-            # but google-genai supports both.
             response = self.client.models.generate_content(
                 model=self.model_name,
                 contents=prompt,
@@ -92,3 +90,16 @@ class GeminiService:
             return "I apologize, but I am currently unable to process your request."
 
 gemini_service = GeminiService()
+
+# Celery Task Wrapper (Optional)
+try:
+    from app.core.celery_app import celery_app
+    import asyncio
+
+    @celery_app.task(name="tasks.extract_knowledge", bind=True)
+    def extract_knowledge_task(self, text: str):
+        """Celery task to run the async extraction in a sync wrapper."""
+        loop = asyncio.get_event_loop()
+        return loop.run_until_complete(gemini_service.extract_scientific_entities(text))
+except (ImportError, Exception):
+    extract_knowledge_task = None

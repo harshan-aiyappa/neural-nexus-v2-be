@@ -40,13 +40,53 @@ async def upload_cypher(
 
 @router.post("/extract")
 async def extract_knowledge(request: ExtractionRequest, current_user: dict = Depends(get_current_user)):
-    """Extract entities and relationships from raw text using LLM."""
+    """
+    Hybrid Extraction:
+    - Uses Celery if Redis Broker is available.
+    - Falls back to Sync extraction if Broker is down (Resilience Pillar).
+    """
+    from app.services.gemini_service import gemini_service, extract_knowledge_task
+    from app.services.cache_service import cache_service
+    
+    # Check if we should use Async flow (Requires Redis)
+    use_async = cache_service.client is not None
+    
+    if use_async:
+        try:
+            task = extract_knowledge_task.delay(request.text)
+            logger.info(f"Offloaded extraction to Celery: {task.id}")
+            return {"status": "Processing", "task_id": task.id, "mode": "async"}
+        except Exception as e:
+            logger.warning(f"Celery dispatch failed: {e}. Falling back to Sync mode.")
+            # Fall through to sync
+
+    # Sync Fallback (Legacy/Resilient mode)
     try:
-        result = await gemini_service.extract_graph(request.text)
-        return result
+        logger.info("Running Synchronous Extraction (Redis/Celery offline)")
+        result = await gemini_service.extract_scientific_entities(request.text)
+        return {"status": "Success", "result": result, "mode": "sync"}
     except Exception as e:
-        logger.error(f"Extraction error: {str(e)}")
+        logger.error(f"extraction error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/task/{task_id}")
+async def get_task_status(task_id: str, current_user: dict = Depends(get_current_user)):
+    """Check the status of an asynchronous extraction task."""
+    try:
+        from app.core.celery_app import celery_app
+        from celery.result import AsyncResult
+        
+        res = AsyncResult(task_id, app=celery_app)
+        if res.state == 'PENDING':
+            return {"status": "Pending", "progress": 0}
+        elif res.state == 'SUCCESS':
+            return {"status": "Success", "result": res.result}
+        elif res.state == 'FAILURE':
+            return {"status": "Failure", "error": str(res.info)}
+        return {"status": res.state}
+    except (ImportError, Exception) as e:
+        logger.error(f"Task status retrieval error: {e}")
+        raise HTTPException(status_code=500, detail="Task tracking unavailable (Redis offline)")
 
 @router.post("/ingest")
 async def ingest_knowledge(request: IngestionRequest, current_user: dict = Depends(get_current_user)):
