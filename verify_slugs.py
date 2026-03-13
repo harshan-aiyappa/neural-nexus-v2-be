@@ -16,7 +16,7 @@ async def verify_slugs():
     async with httpx.AsyncClient() as client:
         try:
             # Test /folders (GET)
-            folders_resp = await client.get("http://localhost:8000/api/folders/", headers=headers)
+            folders_resp = await client.get("http://10.10.20.122:8000/api/folders/", headers=headers)
             print(f"GET /api/folders/: {folders_resp.status_code}")
             folders = folders_resp.json()
             
@@ -35,13 +35,13 @@ async def verify_slugs():
             else:
                 print("No folders found or invalid format. Creating one...")
                 new_folder = {"name": "Verification Folder", "description": "Verification"}
-                create_resp = await client.post("http://localhost:8000/api/folders/", json=new_folder, headers=headers)
+                create_resp = await client.post("http://10.10.20.122:8000/api/folders/", json=new_folder, headers=headers)
                 print(f"POST /api/folders/: {create_resp.status_code}")
                 if create_resp.status_code != 200:
                     print(f"POST failed: {create_resp.text}")
                 
                 # Re-fetch
-                folders_resp = await client.get("http://localhost:8000/api/folders/", headers=headers)
+                folders_resp = await client.get("http://10.10.20.122:8000/api/folders/", headers=headers)
                 folders = folders_resp.json()
                 if isinstance(folders, list):
                     for f in folders:

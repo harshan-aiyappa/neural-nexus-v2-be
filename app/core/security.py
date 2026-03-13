@@ -14,14 +14,17 @@ ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 # 24 hours
 
 import bcrypt
 # Fix for passlib/bcrypt compatibility issue
-# passlib 1.7.4 expects bcrypt.__about__.__version__ which is missing in newer bcrypt
-if not hasattr(bcrypt, "__about__"):
-    class BcryptAbout:
-        __version__ = bcrypt.__version__
-    bcrypt.__about__ = BcryptAbout()
+try:
+    if not hasattr(bcrypt, "__about__"):
+        class BcryptAbout:
+            __version__ = getattr(bcrypt, "__version__", "4.0.1")
+        bcrypt.__about__ = BcryptAbout()
+except Exception:
+    pass
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/auth/login")
+# Using the network IP for tokenUrl as requested
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="http://10.10.20.122:8000/api/auth/login")
 
 class TokenData(BaseModel):
     email: Optional[str] = None
@@ -33,9 +36,29 @@ class User(BaseModel):
     full_name: Optional[str] = None
 
 def verify_password(plain_password, hashed_password):
-    return pwd_context.verify(plain_password, hashed_password)
+    try:
+        # Truncate to 72 bytes to avoid bcrypt limit error if necessary
+        # However, the error usually comes from a version mismatch in passlib
+        if isinstance(plain_password, str):
+            plain_password = plain_password.encode('utf-8')
+        if len(plain_password) > 72:
+            plain_password = plain_password[:72]
+            
+        return pwd_context.verify(plain_password, hashed_password)
+    except Exception as e:
+        # Fallback to direct bcrypt if passlib fails
+        try:
+            if isinstance(hashed_password, str):
+                hashed_password = hashed_password.encode('utf-8')
+            return bcrypt.checkpw(plain_password, hashed_password)
+        except:
+            return False
 
 def get_password_hash(password):
+    if isinstance(password, str):
+        password = password.encode('utf-8')
+    if len(password) > 72:
+        password = password[:72]
     return pwd_context.hash(password)
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
