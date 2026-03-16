@@ -7,6 +7,7 @@ from app.models.schemas import IngestionRequest, ExtractionRequest
 from app.services.neo4j_service import neo4j_service
 from app.services.excel_service import excel_service
 from app.services.gemini_service import gemini_service
+from app.services.ingest_service import ingest_service
 from app.core.security import get_current_user
 
 router = APIRouter()
@@ -21,7 +22,7 @@ async def upload_cypher(
 ):
     """
     Upload a .cypher file and execute it in a specific folder context.
-    Uses label-scoping to isolate the data.
+    Uses label-scoping and Symmetry Guardian protection.
     """
     if not file.filename.endswith('.cypher'):
         raise HTTPException(status_code=400, detail="Only .cypher files are supported")
@@ -29,9 +30,9 @@ async def upload_cypher(
     content = await file.read()
     cypher_text = content.decode('utf-8')
     
-    # Process in background to prevent timeout
+    # Process with IngestService (which includes Guardian sync)
     background_tasks.add_task(
-        neo4j_service.execute_cypher_scoped, 
+        ingest_service.ingest_cypher_bulk, 
         cypher_text, 
         folder_id
     )
@@ -92,12 +93,12 @@ async def get_task_status(task_id: str, current_user: dict = Depends(get_current
 async def ingest_knowledge(request: IngestionRequest, current_user: dict = Depends(get_current_user)):
     """Ingest nodes and relationships into a folder with Symmetry Guardian protection."""
     try:
-        await neo4j_service.merge_entities_with_guardian(
+        result = await ingest_service.ingest_nodes_rels(
             request.nodes, 
             request.relationships, 
             request.folder_id
         )
-        return {"status": "Success", "nodes": len(request.nodes), "rels": len(request.relationships)}
+        return result
     except Exception as e:
         logger.error(f"Ingestion error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))

@@ -39,8 +39,9 @@ class ExcelIngestionService:
                 relationships = extracted.get("relationships", [])
                 
                 if nodes or relationships:
-                    # Ingest into Neo4j with Symmetry Guardian
-                    await neo4j_service.merge_entities_with_guardian(nodes, relationships, folder_id)
+                    # Ingest using high-level IngestService for Symmetry
+                    from app.services.ingest_service import ingest_service
+                    await ingest_service.ingest_nodes_rels(nodes, relationships, folder_id)
                     total_nodes += len(nodes)
                     total_rels += len(relationships)
                 

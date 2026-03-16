@@ -32,8 +32,8 @@ async def get_stats():
             folder_count = 0
             doc_count = 0
         
-        # Dynamic Integrity (Safe check using bracket notation to bypass schema-level existence warnings)
-        sym_res = await neo4j_service.run_query("MATCH ()-[r]->() WHERE r['isSymmetric'] IS NOT NULL AND r['isSymmetric'] = true RETURN count(r) AS count")
+        # Dynamic Integrity (Suppressed schema warnings using keys() check)
+        sym_res = await neo4j_service.run_query("MATCH ()-[r]->() WHERE 'isSymmetric' IN keys(r) AND r['isSymmetric'] = true RETURN count(r) AS count")
         sym_count = sym_res[0]["count"] if sym_res else 0
         
         # If total_rels > 0, calculate actual % , otherwise baseline 99.8
@@ -63,8 +63,32 @@ async def get_activity():
 @router.get("/full", dependencies=[Depends(get_current_user)])
 async def get_full_graph(folder: str = None):
     try:
-        return await neo4j_service.get_full_graph_bidirectional(folder_slug=folder)
+        print(f"DEBUG: get_full_graph called with folder={folder}")
+        # If folder is a slug, resolve it to ID
+        folder_id = folder
+        if folder and not len(folder) == 24: # Not an ObjectID
+            # Case-insensitive match for slug (handles hyphens/underscores)
+            import re
+            collection = mongo_service.db.get_collection("folders")
+            f_doc = await collection.find_one({"slug": re.compile(f"^{folder}$", re.IGNORECASE)})
+            
+            # If not found by slug, try name as fallback (slugified)
+            if not f_doc:
+                 f_doc = await collection.find_one({"name": re.compile(f"^{folder.replace('-', ' ')}$", re.IGNORECASE)})
+            
+            if f_doc:
+                folder_id = str(f_doc["_id"])
+                print(f"DEBUG: Resolved folder '{folder}' to ObjectID '{folder_id}'")
+            else:
+                print(f"DEBUG: Could not resolve folder '{folder}' via slug or name")
+        
+        result = await neo4j_service.get_full_graph_bidirectional(folder_id=folder_id)
+        print(f"DEBUG: Neo4j returned {len(result.get('nodes', []))} nodes and {len(result.get('relationships', []))} rels")
+        return result
     except Exception as e:
+        import traceback
+        print(f"ERROR in get_full_graph: {str(e)}")
+        print(traceback.format_exc())
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/search", dependencies=[Depends(get_current_user)])

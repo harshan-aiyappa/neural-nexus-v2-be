@@ -88,7 +88,9 @@ class Neo4jService:
 
     async def execute_cypher(self, cypher: str):
         """Execute multiple Cypher statements using a retriable write transaction."""
-        statements = [s.strip() for s in cypher.split(";") if s.strip()]
+        # Strip comments and split by semicolon
+        clean_cypher = re.sub(r'//.*', '', cypher)
+        statements = [s.strip() for s in clean_cypher.split(";") if s.strip()]
         
         async def _write_tx(tx):
             tx_results = []
@@ -106,18 +108,30 @@ class Neo4jService:
             db_logger.error(f"Neo4j execute_cypher failed: {e}")
             return {"results": [], "statement_count": 0}
 
+    def slugify_folder(self, name: str) -> str:
+        """Create a URL-safe slug from a folder name."""
+        return name.lower().strip().replace(" ", "-").replace("_", "-")
+
     async def execute_cypher_scoped(self, cypher: str, folder_id: str):
         """
         Execute Cypher while enforcing Native Label Scoping and NexusNode base label.
+        Refined regex to only inject into patterns that don't satisfy NexusNode logic yet.
         """
         folder_label = f"Folder_{folder_id}"
-        # Inject labels into node patterns (e.g., (n:Herb))
-        scoped_cypher = re.sub(r'\(([\w\d]+)(:[\w\d:]+)?', r'(\1\2:NexusNode:`' + folder_label + '`', cypher)
+        # Only inject if the node pattern has a colon but NO NexusNode yet
+        # e.g., (n:Herb) -> (n:Herb:NexusNode:`Folder_123`)
+        # This avoid re-declaring variables like (h) which was causing syntax errors.
+        scoped_cypher = re.sub(
+            r'\(([\w\d]+):([\w\d:]+)', 
+            r'(\1:\2:NexusNode:`' + folder_label + '`', 
+            cypher
+        )
         return await self.execute_cypher(scoped_cypher)
 
-    async def get_full_graph_bidirectional(self, limit_nodes: int = 500, limit_rels: int = 1000, folder_slug: Optional[str] = None):
+    async def get_full_graph_bidirectional(self, limit_nodes: int = 500, limit_rels: int = 1000, folder_id: Optional[str] = None):
         """Fetch graph data with elementId and symmetric relationship collapsing."""
-        label_filter = f":Folder_{folder_slug}" if folder_slug else ""
+        # Use backticks to handle hyphens and IDs
+        label_filter = f":`Folder_{folder_id}`" if folder_id else ""
         
         nodes_res = await self.run_query(f"""
             MATCH (n{label_filter}) 

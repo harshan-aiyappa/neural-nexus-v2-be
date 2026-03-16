@@ -30,3 +30,13 @@ def get_greeting_prompt() -> str:
         "(searching their research data, exploring connections, etc). "
         "Keep it to 2-3 sentences."
     )
+
+def get_query_expansion_prompt() -> str:
+    """Prompt for the Query Expansion node."""
+    return (
+        "You are a scientific knowledge graph expert. "
+        "Analyze the user's research query and extract key entities, "
+        "along with their scientific synonyms or related technical terms. "
+        "Focus on: Herbs, Compounds, Diseases, Biological Processes, and Biomarkers.\n\n"
+        "Output ONLY a JSON array of strings containing the unique terms."
+    )

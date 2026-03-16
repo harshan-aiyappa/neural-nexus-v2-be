@@ -18,7 +18,7 @@ async def get_folders():
         # Use semantic slug to match node counts
         slug = neo4j_service.slugify_folder(folder["name"])
         folder["slug"] = slug
-        folder["node_count"] = counts.get(slug, 0)
+        folder["node_count"] = counts.get(folder["id"], 0)
         
     return folders
 

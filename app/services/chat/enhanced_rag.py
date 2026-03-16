@@ -1,4 +1,3 @@
-import logging
 import json
 import asyncio
 import time as _time
@@ -8,8 +7,7 @@ from app.services.neo4j_service import neo4j_service
 from app.services.gemini_service import gemini_service
 from app.services.chat.prompts import get_enhanced_rag_system_prompt, get_greeting_prompt
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, SystemMessage
-
-logger = logging.getLogger(__name__)
+from app.logging_utils import ai_logger as logger
 
 class RAGState(TypedDict):
     query: str
@@ -33,6 +31,7 @@ class EnhancedRAGService:
         builder = StateGraph(RAGState)
 
         builder.add_node("clarify", self._clarification_node)
+        builder.add_node("expand", self._expansion_node)
         builder.add_node("retrieve", self._retrieval_node)
         builder.add_node("generate", self._generation_node)
 
@@ -41,9 +40,10 @@ class EnhancedRAGService:
         builder.add_conditional_edges(
             "clarify",
             lambda x: "end" if x.get("needs_clarification") else "continue",
-            {"end": END, "continue": "retrieve"}
+            {"end": END, "continue": "expand"}
         )
         
+        builder.add_edge("expand", "retrieve")
         builder.add_edge("retrieve", "generate")
         builder.add_edge("generate", END)
 
@@ -57,61 +57,84 @@ class EnhancedRAGService:
             return {"needs_clarification": True, "answer": suggest}
         return {"needs_clarification": False}
 
+    async def _expansion_node(self, state: RAGState):
+        """Expand user query into scientific terms using Gemini."""
+        from app.services.chat.prompts import get_query_expansion_prompt
+        
+        prompt = get_query_expansion_prompt()
+        user_input = f"User Query: {state['query']}"
+        
+        try:
+            expansion_raw = await gemini_service.generate_response(user_input, prompt)
+            # Clean JSON if Gemini wraps it in code blocks
+            clean_json = expansion_raw.strip().replace("```json", "").replace("```", "").strip()
+            terms = json.loads(clean_json)
+            if not isinstance(terms, list): terms = [state['query']]
+            logger.info(f"Expanded Query Terms: {terms}")
+            return {"enhanced_query": ", ".join(terms)}
+        except Exception as e:
+            logger.warning(f"Query expansion failed: {e}. Using original query.")
+            return {"enhanced_query": state['query']}
+
     async def _retrieval_node(self, state: RAGState):
-        """Fetch contextual data from Neo4j based on the folder slug."""
+        """Fetch contextual data from Neo4j with multi-hop undirected traversal."""
         slug = state.get('folder_slug')
         label_filter = f":Folder_{slug}" if slug else ""
         
-        # Simple lexical/label-based search for now
-        query = f"""
+        # 1. Broad Anchor Search (Lexical)
+        raw_terms = state.get('enhanced_query') or state.get('query') or ""
+        terms = str(raw_terms).split(", ")
+        
+        anchor_query = f"""
         MATCH (n{label_filter})
-        WHERE toLower(toString(coalesce(n.name, n.id, elementId(n), ''))) CONTAINS toLower($term)
-        OR toLower(toString(coalesce(n.description, ''))) CONTAINS toLower($term)
-        RETURN coalesce(n.name, toString(n.id), elementId(n)) as name, coalesce(n.description, '') as description, labels(n)[0] as type
+        WHERE ANY(term IN $terms WHERE toLower(toString(coalesce(n.name, n.id, ''))) CONTAINS toLower(term))
+        RETURN DISTINCT n.id as id, coalesce(n.name, n.id) as name, labels(n)[0] as type
         LIMIT 10
         """
-        results = neo4j_service.run_query(query, {"term": state['query']})
+        anchors = await neo4j_service.run_query(anchor_query, {"terms": terms})
         
-        context = []
-        for r in results:
-            context.append(f"• {r['name']} [{r['type']}]: {r['description']}")
-            
-        # Extend context with multi-hop undirected relationships (-[:REL*1..2]-)
-        if results:
-            # Fixing Directional Ignorance: Using Undirected Pathfinding (hop depth = 1 to 2)
-            rel_query = f"""
-            MATCH p = (n{label_filter})-[*1..2]-(m)
-            WHERE n.name IN $names
-            UNWIND relationships(p) as r
-            WITH startNode(r) as s, type(r) as t, endNode(r) as d
-            RETURN DISTINCT coalesce(s.name, s.id, 'Unknown') as source, 
-                            t as type, 
-                            coalesce(d.name, d.id, 'Unknown') as target
-            LIMIT 50
-            """
-            names = [r['name'] for r in results]
-            rels = neo4j_service.run_query(rel_query, {"names": names})
-            for r in rels:
-                context.append(f"Relationship: {r['source']} -[{r['type']}]-> {r['target']}")
+        if not anchors:
+            return {"context": ["No direct matches found in the knowledge graph."]}
 
-        return {"context": context}
+        anchor_ids = [a['id'] for a in anchors]
+        
+        # 2. Multi-Hop Undirected Traversal (Depth 1-2)
+        rel_query = f"""
+        MATCH p = (n{label_filter})-[*1..2]-(m)
+        WHERE n.id IN $ids
+        UNWIND relationships(p) as r
+        WITH startNode(r) as s, type(r) as t, endNode(r) as d
+        RETURN DISTINCT 
+            coalesce(s.name, s.id) as source, 
+            t as type, 
+            coalesce(d.name, d.id) as target,
+            labels(s)[0] as s_type,
+            labels(d)[0] as d_type
+        LIMIT 40
+        """
+        rels = await neo4j_service.run_query(rel_query, {"ids": anchor_ids})
+        
+        context: List[str] = []
+        # Add basic info about anchor nodes
+        for a in anchors:
+            context.append(f"Entity: {a['name']} ({a['type']})")
+            
+        # Add relationship context
+        for r in rels:
+            context.append(f"Connection: {r['source']} ({r['s_type']}) -[{r['type']}]- {r['target']} ({r['d_type']})")
+
+        logger.info(f"Retrieved {len(context)} context segments via multi-hop.")
+        return {"context": context[:50]}
 
     async def _generation_node(self, state: RAGState):
         """Generate final answer using Gemini."""
-        context_str = "\n".join(state.get('context', []))
-        system_prompt = get_enhanced_rag_system_prompt()
+        raw_context = state.get('context') or []
+        context_list = list(raw_context) if isinstance(raw_context, (list, tuple)) else []
+        context_str = "\n".join([str(c) for c in context_list])
         
+        system_prompt = get_enhanced_rag_system_prompt()
         user_prompt = f"FOLDER CONTEXT: {state.get('folder_slug')}\n\nDATABASE EVIDENCE:\n{context_str}\n\nUSER QUESTION: {state['query']}"
         
-        # Call Gemini (using the existing service)
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt}
-        ]
-        
-        # Adapt history if available
-        # ... logic for history ...
-
         reply = await gemini_service.generate_response(user_prompt, system_prompt)
         
         # Simple grounding score calculation

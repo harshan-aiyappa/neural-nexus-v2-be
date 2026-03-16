@@ -11,26 +11,69 @@ from app.services import neo4j_service
 from app.db.mongo_utils import mongo_service
 from app.logging_utils import logger
 
+import os
+import redis
+from google import genai
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifecycle — verify connectivity on startup."""
+    services_status = []
+    
+    # 1. Verify Neo4j
+    neo4j_uri = os.getenv("NEO4J_URI", "bolt://localhost:7687")
     try:
-        # Verify Neo4j
         await neo4j_service.verify_connectivity()
         await neo4j_service.setup_constraints()
-        logger.info("[OK] Neo4j connection and constraints verified")
-        
-        # Verify Mongo (Async) - short timeout to not hang startup
-        try:
-            from pymongo.errors import ServerSelectionTimeoutError
-            # We don't want to wait 30s for a failure
-            await mongo_service.client.admin.command('ping', serverSelectionTimeoutMS=2000)
-            logger.info("[OK] MongoDB connection verified")
-        except Exception as mongo_err:
-            logger.warning(f"[WARN] MongoDB unreachable (Guest Mode active): {mongo_err}")
-
+        services_status.append(("Neo4j", neo4j_uri, "✅ OK"))
     except Exception as e:
-        logger.error(f"[WARN] Database connection failed: {e}")
+        services_status.append(("Neo4j", neo4j_uri, f"❌ FAILED ({str(e)[:30]}...)"))
+
+    # 2. Verify MongoDB
+    mongo_uri = os.getenv("MONGODB_URI", "mongodb://localhost:27017")
+    try:
+        import asyncio
+        await asyncio.wait_for(mongo_service.client.admin.command('ping'), timeout=2.0)
+        services_status.append(("MongoDB", mongo_uri, "✅ OK"))
+    except Exception as e:
+        services_status.append(("MongoDB", mongo_uri, f"❌ FAILED ({str(e)[:30]}...)"))
+
+    # 3. Verify Redis
+    redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+    try:
+        r = redis.from_url(redis_url, socket_timeout=2)
+        r.ping()
+        services_status.append(("Redis", redis_url, "✅ OK"))
+    except Exception as e:
+        services_status.append(("Redis", redis_url, f"❌ FAILED ({str(e)[:30]}...)"))
+
+    # 4. Verify Gemini API
+    api_key = os.getenv("GEMINI_API_KEY")
+    model_name = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+    try:
+        if not api_key:
+            raise ValueError("No API Key found in .env")
+        
+        # New SDK verification
+        client = genai.Client(api_key=api_key)
+        # Verify with a lightweight call (checking models)
+        client.models.get(model=model_name)
+        services_status.append(("Gemini API", "Cloud", "✅ OK"))
+    except Exception as e:
+        err_msg = str(e).lower()
+        status = "❌ FAILED (Expired/Invalid)" if "expired" in err_msg or "400" in err_msg else f"❌ FAILED ({str(e)[:20]})"
+        services_status.append(("Gemini API", "Cloud", status))
+
+    # Log Service Dashboard
+    dashboard = ["\n" + "="*60, "       NEURAL NEXUS V2 - SERVICE CONNECTIVITY DASHBOARD", "="*60, f"{'SERVICE':<15} | {'URI/LOCATION':<30} | {'STATUS'}", "-" * 60]
+    for name, uri, status in services_status:
+        short_uri = (uri[:27] + "...") if len(uri) > 30 else uri
+        dashboard.append(f"{name:<15} | {short_uri:<30} | {status}")
+    dashboard.append("="*60 + "\n")
+    
+    for line in dashboard:
+        logger.info(line)
+
     yield
     # Shutdown
     await neo4j_service.close()

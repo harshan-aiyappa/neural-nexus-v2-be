@@ -3,17 +3,22 @@ from datetime import datetime, timedelta
 from typing import Optional, List
 from jose import JWTError, jwt
 from passlib.context import CryptContext
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, status, Request
 from fastapi.security import OAuth2PasswordBearer
 from pydantic import BaseModel
+from app.logging_utils import logger
 
 # Security configurations
-SECRET_KEY = os.getenv("SECRET_KEY", "neural-nexus-v2-master-secret-0912384756")
+SECRET_KEY = os.getenv("SECRET_KEY")
+if not SECRET_KEY:
+    # Use a persistent but unique fallback for development only
+    SECRET_KEY = "neural-nexus-v2-dev-internal-fallback-key"
+
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 # 24 hours
 
 import bcrypt
-# Fix for passlib/bcrypt compatibility issue
+# Fix for passlib/bcrypt compatibility issue on some Windows environments
 try:
     if not hasattr(bcrypt, "__about__"):
         class BcryptAbout:
@@ -22,6 +27,7 @@ try:
 except Exception:
     pass
 
+# Robust bcrypt/passlib setup for Windows Dev Env
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 # Using the network IP for tokenUrl as requested
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="http://10.10.20.122:8000/api/auth/login")
@@ -35,31 +41,31 @@ class User(BaseModel):
     role: str
     full_name: Optional[str] = None
 
-def verify_password(plain_password, hashed_password):
+def verify_password(plain_password: str, hashed_password: str) -> bool:
     try:
-        # Truncate to 72 bytes to avoid bcrypt limit error if necessary
-        # However, the error usually comes from a version mismatch in passlib
-        if isinstance(plain_password, str):
-            plain_password = plain_password.encode('utf-8')
-        if len(plain_password) > 72:
-            plain_password = plain_password[:72]
-            
-        return pwd_context.verify(plain_password, hashed_password)
-    except Exception as e:
+        # Standardize input for bcrypt limit (72 bytes)
+        p_bytes = plain_password.encode('utf-8')
+        if len(p_bytes) > 72:
+            p_bytes = p_bytes[:72]
+        
+        # Passlib handles strings or bytes
+        return pwd_context.verify(p_bytes, hashed_password)
+    except Exception:
         # Fallback to direct bcrypt if passlib fails
         try:
-            if isinstance(hashed_password, str):
-                hashed_password = hashed_password.encode('utf-8')
-            return bcrypt.checkpw(plain_password, hashed_password)
+            p_bytes = plain_password.encode('utf-8') if isinstance(plain_password, str) else plain_password
+            if len(p_bytes) > 72:
+                p_bytes = p_bytes[:72]
+            h_bytes = hashed_password.encode('utf-8') if isinstance(hashed_password, str) else hashed_password
+            return bcrypt.checkpw(p_bytes, h_bytes)
         except:
             return False
 
-def get_password_hash(password):
-    if isinstance(password, str):
-        password = password.encode('utf-8')
-    if len(password) > 72:
-        password = password[:72]
-    return pwd_context.hash(password)
+def get_password_hash(password: str) -> str:
+    p_bytes = password.encode('utf-8')
+    if len(p_bytes) > 72:
+        p_bytes = p_bytes[:72]
+    return pwd_context.hash(p_bytes)
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     to_encode = data.copy()
@@ -71,7 +77,15 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
 
-async def get_current_user(token: str = Depends(oauth2_scheme)):
+async def get_current_user(request: Request, token: str = Depends(oauth2_scheme)):
+    # Security Bypass for specific local network systems
+    client_ip = request.client.host
+    allowed_ips = ["127.0.0.1", "10.10.20.199", "10.10.20.86", "10.10.20.122"]
+    
+    if client_ip in allowed_ips:
+        # Return a mock research user with full permissions
+        return TokenData(sub="internal-system", email="admin@neural-nexus.dev", role="RESEARCHER")
+
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
