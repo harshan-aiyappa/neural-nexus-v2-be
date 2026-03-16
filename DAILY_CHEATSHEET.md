@@ -1,11 +1,12 @@
 # 🗓️ Neural Nexus V2 — Daily Git Cheat Sheet
 
 ## 👤 Who Does What?
-| Person | Branch | Files They Own |
-| :--- | :--- | :--- |
-| **Harshan** | `feat/harshan/core-graph` | `graph.py`, `neo4j_service.py`, `security.py`, `Discovery.tsx` |
-| **Namitha** | `feat/namitha/nexus-ai-chat` | `chat.py`, `gemini_service.py`, `Chat.tsx` |
-| **Both merge into** | `dev` → `main` | After review |
+
+| Person                    | Branch                         | Files They Own                                                         |
+| :------------------------ | :----------------------------- | :--------------------------------------------------------------------- |
+| **Harshan**         | `feat/harshan/core-graph`    | `graph.py`, `neo4j_service.py`, `security.py`, `Discovery.tsx` |
+| **Namitha**         | `feat/namitha/nexus-ai-chat` | `chat.py`, `gemini_service.py`, `Chat.tsx`                       |
+| **Both merge into** | `dev` → `main`            | After review                                                           |
 
 ---
 
@@ -38,13 +39,13 @@ git push origin feat/harshan/core-graph
 
 ### Commit Message Examples
 
-| Type | Example |
-| :--- | :--- |
-| `feat` | `feat(chat): add context memory across messages` |
-| `fix` | `fix(graph): resolve empty node list for phytochemical KG` |
-| `chore` | `chore(deps): update requirements.txt` |
-| `docs` | `docs: update API endpoint examples` |
-| `refactor` | `refactor(security): extract IP allowlist to .env` |
+| Type         | Example                                                      |
+| :----------- | :----------------------------------------------------------- |
+| `feat`     | `feat(chat): add context memory across messages`           |
+| `fix`      | `fix(graph): resolve empty node list for phytochemical KG` |
+| `chore`    | `chore(deps): update requirements.txt`                     |
+| `docs`     | `docs: update API endpoint examples`                       |
+| `refactor` | `refactor(security): extract IP allowlist to .env`         |
 
 ---
 
@@ -112,9 +113,9 @@ git branch -a                # See all branches
 
 ## 🛠️ Services Quick Reference
 
-| Service | URL | Start Command |
-| :--- | :--- | :--- |
-| Backend | `http://10.10.20.122:8000` | `uvicorn app.main:app --reload --host 0.0.0.0 --port 8000` |
-| Frontend | `http://10.10.20.122:5173` | `npm run dev` |
-| Redis UI | `http://10.10.20.122:8081` | Docker (already running) |
-| Neo4j | `http://10.10.20.122:7474` | Running on server |
+| Service  | URL                          | Start Command                                                |
+| :------- | :--------------------------- | :----------------------------------------------------------- |
+| Backend  | `http://10.10.20.122:8000` | `uvicorn app.main:app --reload --host 0.0.0.0 --port 8000` |
+| Frontend | `http://10.10.20.122:5173` | `npm run dev`                                              |
+| Redis UI | `http://10.10.20.122:8081` | Docker (already running)                                     |
+| Neo4j    | `http://10.10.20.122:7474` | Running on server                                            |
