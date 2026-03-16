@@ -36,3 +36,9 @@ class ChatRequest(BaseModel):
 class GraphSearchRequest(BaseModel):
     query: str
     node_type: Optional[str] = None
+
+class DeepAnalyzeRequest(BaseModel):
+    node_id: str
+    folder_slug: Optional[str] = None
+    node_name: Optional[str] = None
+    node_label: Optional[str] = None

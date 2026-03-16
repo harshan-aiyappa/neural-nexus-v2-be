@@ -34,6 +34,7 @@ class EnhancedRAGService:
         builder.add_node("expand", self._expansion_node)
         builder.add_node("retrieve", self._retrieval_node)
         builder.add_node("generate", self._generation_node)
+        builder.add_node("persist", self._persistence_node)
 
         builder.set_entry_point("clarify")
         
@@ -45,7 +46,8 @@ class EnhancedRAGService:
         
         builder.add_edge("expand", "retrieve")
         builder.add_edge("retrieve", "generate")
-        builder.add_edge("generate", END)
+        builder.add_edge("generate", "persist")
+        builder.add_edge("persist", END)
 
         return builder.compile()
 
@@ -141,6 +143,43 @@ class EnhancedRAGService:
         score = 0.95 if context_str else 0.5
         
         return {"answer": reply, "grounding_score": score}
+
+    async def _persistence_node(self, state: RAGState):
+        """Async persistence of chat to Mongo and Neo4j."""
+        from app.db.mongo_utils import mongo_service
+        from datetime import datetime
+
+        try:
+            # 1. Generate Embedding for the session
+            combined_text = f"Q: {state['query']} A: {state['answer']}"
+            embedding = await gemini_service.generate_embeddings(combined_text)
+            
+            # 2. Extract mentioned IDs from context (simple matching)
+            mentions = []
+            context = state.get('context', [])
+            # Heuristic: Find and match anchor IDs mentioned in retrieve node logic
+            # For now, we'll keep it simple and just persist the basics
+            
+            chat_data = {
+                "message": state['query'],
+                "response": state['answer'],
+                "embedding": embedding,
+                "folder_slug": state.get('folder_slug'),
+                "timestamp": datetime.utcnow().isoformat(),
+                "mentions": mentions
+            }
+
+            # 3. Dual Save
+            await asyncio.gather(
+                mongo_service.save_chat_message(chat_data),
+                neo4j_service.save_chat_as_node(chat_data)
+            )
+            
+            logger.info("Chat persisted to Hybrid Storage.")
+        except Exception as e:
+            logger.error(f"Persistence node failed: {e}")
+            
+        return {}
 
     async def chat(self, user_query: str, folder_slug: Optional[str] = None, history: List[BaseMessage] = []):
         initial_state = {

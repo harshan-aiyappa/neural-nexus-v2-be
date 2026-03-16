@@ -1,5 +1,6 @@
 from neo4j import AsyncGraphDatabase
 import os
+import time
 import re
 from typing import List, Dict, Any, Optional
 from app.logging_utils import db_logger
@@ -10,10 +11,6 @@ class Neo4jService:
         user = os.getenv("NEO4J_USER", "neo4j")
         password = os.getenv("NEO4J_PASSWORD")
         self.driver = AsyncGraphDatabase.driver(uri, auth=(user, password))
-
-    def slugify_folder(self, name: str) -> str:
-        """Standardized slugification matching seed_db.py."""
-        return re.sub(r'[\W_]+', '_', name).upper()
 
     async def verify_connectivity(self):
         await self.driver.verify_connectivity()
@@ -38,13 +35,26 @@ class Neo4jService:
             db_logger.error(f"Neo4j read query failed: {e}")
             return []
 
+    async def run_write_query(self, query: str, parameters: Optional[Dict[str, Any]] = None):
+        """Execute a write query using a retriable transaction function."""
+        async def _write_tx(tx):
+            result = await tx.run(query, parameters or {})
+            return await result.data()
+
+        try:
+            async with self.driver.session() as session:
+                return await session.execute_write(_write_tx)
+        except Exception as e:
+            db_logger.error(f"Neo4j write query failed: {e}")
+            return []
+
     async def setup_constraints(self):
         """Pre-configure Neo4j with uniqueness constraints for performance and integrity."""
         db_logger.info("Configuring Neo4j indices and constraints...")
         # Constraint on base label for global ID lookup
-        await self.execute_cypher("CREATE CONSTRAINT nexus_node_id IF NOT EXISTS FOR (n:NexusNode) REQUIRE n.id IS UNIQUE")
+        await self.execute_cypher("CREATE CONSTRAINT therapeutic_use_id IF NOT EXISTS FOR (n:TherapeuticUse) REQUIRE n.id IS UNIQUE")
         # Indices for common search properties
-        await self.execute_cypher("CREATE INDEX node_name_idx IF NOT EXISTS FOR (n:NexusNode) ON (n.name)")
+        await self.execute_cypher("CREATE INDEX therapeutic_use_name_idx IF NOT EXISTS FOR (n:TherapeuticUse) ON (n.name)")
         db_logger.info("Neo4j constraints configured.")
 
     async def get_schema_info(self):
@@ -114,16 +124,16 @@ class Neo4jService:
 
     async def execute_cypher_scoped(self, cypher: str, folder_id: str):
         """
-        Execute Cypher while enforcing Native Label Scoping and NexusNode base label.
-        Refined regex to only inject into patterns that don't satisfy NexusNode logic yet.
+        Execute Cypher while enforcing Native Label Scoping and TherapeuticUse base label.
+        Refined regex to only inject into patterns that don't satisfy TherapeuticUse logic yet.
         """
         folder_label = f"Folder_{folder_id}"
-        # Only inject if the node pattern has a colon but NO NexusNode yet
-        # e.g., (n:Herb) -> (n:Herb:NexusNode:`Folder_123`)
+        # Only inject if the node pattern has a colon but NO TherapeuticUse yet
+        # e.g., (n:Herb) -> (n:Herb:TherapeuticUse:`Folder_123`)
         # This avoid re-declaring variables like (h) which was causing syntax errors.
         scoped_cypher = re.sub(
             r'\(([\w\d]+):([\w\d:]+)', 
-            r'(\1:\2:NexusNode:`' + folder_label + '`', 
+            r'(\1:\2:TherapeuticUse:`' + folder_label + '`', 
             cypher
         )
         return await self.execute_cypher(scoped_cypher)
@@ -135,7 +145,7 @@ class Neo4jService:
         
         nodes_res = await self.run_query(f"""
             MATCH (n{label_filter}) 
-            RETURN elementId(n) AS id, labels(n)[0] AS label, coalesce(n['name'], n['id'], 'Unnamed') AS name, properties(n) AS properties 
+            RETURN elementId(n) AS id, labels(n)[0] AS label, coalesce(n['name'], n['scientific_name'], n['common_name'], n['id'], 'Unnamed') AS name, properties(n) AS properties 
             LIMIT {limit_nodes}
         """)
         
@@ -168,6 +178,60 @@ class Neo4jService:
 
         return {"nodes": nodes_res, "relationships": processed_rels}
 
+    async def get_neighbors(self, node_id: str, folder_id: Optional[str] = None):
+        """Fetch immediate neighbors of a specific node."""
+        folder_label = f"Folder_{folder_id}" if folder_id else None
+        
+        # Base query to fetch neighbors
+        # We use OPTIONAL MATCH to ensure we get something even if no neighbors exist (though usually redundant for expansion)
+        query = """
+        MATCH (n)-[r]-(m)
+        WHERE elementId(n) = $node_id
+        RETURN 
+            elementId(m) AS id, 
+            labels(m)[0] AS label, 
+            labels(m) AS all_labels,
+            coalesce(m['name'], m['scientific_name'], m['common_name'], m['id'], 'Unnamed') AS name, 
+            properties(m) AS properties,
+            elementId(m) AS m_id,
+            elementId(n) AS n_id,
+            type(r) AS rel_type,
+            properties(r) AS rel_props,
+            elementId(r) AS rel_id
+        """
+        results = await self.run_query(query, {"node_id": node_id})
+        
+        nodes = []
+        relationships = []
+        seen_node_ids = {node_id} 
+        
+        for record in results:
+            m_id = record['id']
+            
+            # If folder scoping is active, only include nodes that belong to the folder
+            if folder_label and folder_label not in record['all_labels']:
+                continue
+
+            if m_id not in seen_node_ids:
+                nodes.append({
+                    "id": m_id,
+                    "label": record['label'],
+                    "name": record['name'],
+                    "properties": record['properties']
+                })
+                seen_node_ids.add(m_id)
+            
+            relationships.append({
+                "id": record['rel_id'],
+                "source": record['n_id'],
+                "target": record['m_id'],
+                "type": record['rel_type'],
+                "properties": record['rel_props'],
+                "isSymmetric": record['rel_props'].get('isSymmetric', False)
+            })
+            
+        return {"nodes": nodes, "relationships": relationships}
+
     async def get_folder_node_counts(self):
         """Get node counts for all folders using efficient partial label scan."""
         query = """
@@ -187,7 +251,7 @@ class Neo4jService:
         async def _ingest_tx(tx):
             for node in nodes:
                 # Merge on base labels and ID
-                q = f"MERGE (n:NexusNode:`{node['label']}`:`{folder_label}` {{id: $id}}) SET n += $props"
+                q = f"MERGE (n:TherapeuticUse:`{node['label']}`:`{folder_label}` {{id: $id}}) SET n += $props"
                 await tx.run(q, id=node['id'], props=node.get('properties', {}))
             
             for rel in relationships:
@@ -216,7 +280,7 @@ class Neo4jService:
         """Asynchronously processes nodes missing embeddings in batches."""
         from app.services.gemini_service import gemini_service
         import asyncio
-        batch_size = 500
+        batch_size = 200
         folder_match = f":Folder_{folder_id}" if folder_id else ""
         
         while True:
@@ -227,14 +291,41 @@ class Neo4jService:
             RETURN elementId(n) as node_id, coalesce(n['name'], '') + ' ' + coalesce(n['description'], '') as text
             LIMIT {batch_size}
             """
-            batch_nodes = await self.run_query(query)
+            batch_nodes = await self.run_write_query(query)
             if not batch_nodes or not isinstance(batch_nodes, list): break
                 
             embeddings = await gemini_service.generate_embeddings_batch([n['text'] for n in batch_nodes])
             if not embeddings: break
                 
             updates = [{"id": batch_nodes[i]['node_id'], "emb": embeddings[i]} for i in range(len(batch_nodes))]
-            await self.run_query("UNWIND $upd AS row MATCH (n) WHERE elementId(n) = row.id SET n.embedding = row.emb", {"upd": updates})
+            await self.run_write_query("UNWIND $upd AS row MATCH (n) WHERE elementId(n) = row.id SET n.embedding = row.emb", {"upd": updates})
             await asyncio.sleep(1)
+
+    async def save_chat_as_node(self, chat_data: Dict):
+        """Store chat as a node and link to topic/folder."""
+        node_id = f"chat_{time.time()}"
+        folder_label = f"Folder_{chat_data.get('folder_slug')}" if chat_data.get('folder_slug') else None
+        
+        async def _persist_tx(tx):
+            # 1. Create ChatMessage node
+            q = "CREATE (c:ChatMessage {id: $id, text: $text, response: $response, embedding: $emb, timestamp: $ts})"
+            await tx.run(q, id=node_id, text=chat_data['message'], response=chat_data['response'], emb=chat_data.get('embedding'), ts=chat_data.get('timestamp'))
+            
+            # 2. Link to Folder if available
+            if folder_label:
+                link_folder_q = f"MATCH (c:ChatMessage {{id: $id}}), (f:`{folder_label}`) MERGE (c)-[:FOR_TOPIC]->(f)"
+                await tx.run(link_folder_q, id=node_id)
+            
+            # 3. Link to mentioned entities (Simple approach: if IDs are in mentions list)
+            mentions = chat_data.get('mentions', [])
+            for m_id in mentions:
+                link_entity_q = "MATCH (c:ChatMessage {id: $id}), (e) WHERE elementId(e) = $m_id MERGE (c)-[:MENTIONS]->(e)"
+                await tx.run(link_entity_q, id=node_id, m_id=m_id)
+
+        try:
+            async with self.driver.session() as session:
+                await session.execute_write(_persist_tx)
+        except Exception as e:
+            db_logger.error(f"Neo4j chat persistence failed: {e}")
 
 neo4j_service = Neo4jService()

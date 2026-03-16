@@ -64,6 +64,12 @@ async def lifespan(app: FastAPI):
         status = "❌ FAILED (Expired/Invalid)" if "expired" in err_msg or "400" in err_msg else f"❌ FAILED ({str(e)[:20]})"
         services_status.append(("Gemini API", "Cloud", status))
 
+    # 5. Trigger Background Embedding Backfill (Step ID: 226)
+    if all(s[2] == "✅ OK" for s in services_status if s[0] in ["Neo4j", "Gemini API"]):
+        import asyncio
+        asyncio.create_task(neo4j_service.process_embeddings_batch())
+        logger.info("[INIT] Neo4j Embedding Backfill started in background")
+
     # Log Service Dashboard
     dashboard = ["\n" + "="*60, "       NEURAL NEXUS V2 - SERVICE CONNECTIVITY DASHBOARD", "="*60, f"{'SERVICE':<15} | {'URI/LOCATION':<30} | {'STATUS'}", "-" * 60]
     for name, uri, status in services_status:

@@ -1,10 +1,11 @@
 from fastapi import APIRouter, HTTPException, Depends
 from typing import Optional
-from app.models.schemas import GraphSearchRequest
+from app.models.schemas import GraphSearchRequest, DeepAnalyzeRequest
 from app.services.neo4j_service import neo4j_service
 from app.core.security import get_current_user
 from app.db.mongo_utils import mongo_service
 from app.services import gds_service
+from app.services.gemini_service import gemini_service
 
 router = APIRouter()
 
@@ -91,6 +92,22 @@ async def get_full_graph(folder: str = None):
         print(traceback.format_exc())
         raise HTTPException(status_code=500, detail=str(e))
 
+@router.get("/neighbors", dependencies=[Depends(get_current_user)])
+async def get_node_neighbors(node_id: str, folder: Optional[str] = None):
+    try:
+        # Resolve folder slug if needed
+        folder_id = folder
+        if folder and not len(folder) == 24:
+            import re
+            collection = mongo_service.db.get_collection("folders")
+            f_doc = await collection.find_one({"slug": re.compile(f"^{folder}$", re.IGNORECASE)})
+            if f_doc:
+                folder_id = str(f_doc["_id"])
+        
+        return await neo4j_service.get_neighbors(node_id=node_id, folder_id=folder_id)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @router.post("/search", dependencies=[Depends(get_current_user)])
 async def search_nodes(request: GraphSearchRequest):
     try:
@@ -122,4 +139,66 @@ async def get_pagerank(folder: Optional[str] = None):
         result = await gds_service.get_pagerank(folder_id=folder)
         return {"results": result, "count": len(result)}
     except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/deep-analyze", dependencies=[Depends(get_current_user)])
+async def deep_analyze_node(request: DeepAnalyzeRequest):
+    """
+    Neighborhood Expansion (2-hop) and Gemini-powered reasoning for a single node.
+    """
+    try:
+        from app.logging_utils import ai_logger
+        ai_logger.info(f"Deep Analyze triggered for node: {request.node_id} ({request.node_name})")
+        
+        # 1. Fetch 2-hop neighborhood context
+        label_filter = f":Folder_{request.folder_slug}" if request.folder_slug else ""
+        query = f"""
+        MATCH p = (n{label_filter})-[*1..2]-(m)
+        WHERE n.id = $id
+        UNWIND relationships(p) as r
+        WITH startNode(r) as s, type(r) as t, endNode(r) as d
+        RETURN DISTINCT 
+            coalesce(s.name, s.id) as source, 
+            t as type, 
+            coalesce(d.name, d.id) as target,
+            labels(s)[0] as s_type,
+            labels(d)[0] as d_type
+        LIMIT 50
+        """
+        rels = await neo4j_service.run_query(query, {"id": request.node_id})
+        
+        # 2. Format context for Gemini
+        context = []
+        context.append(f"CORE NODE: {request.node_name or request.node_id} (Type: {request.node_label or 'Entity'})")
+        for r in rels:
+            context.append(f"- {r['source']} ({r['s_type']}) --[{r['type']}]--> {r['target']} ({r['d_type']})")
+        
+        context_str = "\n".join(context)
+        
+        # 3. Request reasoning from Gemini
+        system_prompt = """
+        You are the Nexus V2 Intelligence Engine. 
+        You will receive a 2-hop neighborhood context from a Knowledge Graph.
+        Your task is to provide a 'Deep Reason' report.
+        Identify:
+        1. Hidden patterns or central influence of this node.
+        2. Potential risks or missing connections.
+        3. Strategic insights based on the relationship types.
+        
+        Keep it professional, high-fidelity, and formatted in clear Markdown sections.
+        Focus on scientific and operational implications.
+        """
+        
+        user_prompt = f"RELATIONSHIP CONTEXT:\n{context_str}\n\nTask: Analyze the significance of '{request.node_name or request.node_id}' in this network."
+        
+        report = await gemini_service.generate_response(user_prompt, system_prompt)
+        
+        return {
+            "node_id": request.node_id,
+            "report": report,
+            "neighborhood_size": len(rels)
+        }
+    except Exception as e:
+        import traceback
+        print(traceback.format_exc())
         raise HTTPException(status_code=500, detail=str(e))
