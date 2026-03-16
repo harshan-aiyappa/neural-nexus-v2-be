@@ -1,4 +1,4 @@
-from app.services.chat.router import router as chat_router
+from app.ai_chat.router import router as chat_router
 
-# This file just re-exports the new router to maintain backward compatibility with __init__.py
+# This file just re-exports the new isolated AI Chat router
 router = chat_router
