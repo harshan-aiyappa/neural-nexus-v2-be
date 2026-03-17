@@ -16,7 +16,7 @@ async def test_hybrid_chat():
             # Note: We might need a JWT if the endpoint is protected
             # For testing, we can use a mock token or temporarily disable auth if needed
             # But let's try calling it.
-            resp = await client.post(f"{base_url}/chat/", json=chat_req, timeout=30.0)
+            resp = await client.post(f"{base_url}/chat", json=chat_req, timeout=30.0)
             
             if resp.status_code == 200:
                 print("SUCCESS: Chat response received.")

@@ -29,10 +29,11 @@ except Exception:
 
 # Robust bcrypt/passlib setup for Windows Dev Env
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-# Using the network IP for tokenUrl as requested
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="http://10.10.20.122:8000/api/auth/login")
+# Using the network IP for tokenUrl as requested. auto_error=False allows the IP bypass to work without a token.
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="http://10.10.20.122:8000/api/auth/login", auto_error=False)
 
 class TokenData(BaseModel):
+    sub: Optional[str] = None
     email: Optional[str] = None
     role: Optional[str] = None
 
@@ -77,7 +78,7 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
 
-async def get_current_user(request: Request, token: str = Depends(oauth2_scheme)):
+async def get_current_user(request: Request, token: Optional[str] = Depends(oauth2_scheme)):
     # Security Bypass for specific local network systems
     client_ip = request.client.host
     allowed_ips = ["127.0.0.1", "10.10.20.199", "10.10.20.86", "10.10.20.122"]
