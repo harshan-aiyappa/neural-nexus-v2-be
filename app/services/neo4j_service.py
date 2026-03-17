@@ -45,7 +45,34 @@ class Neo4jService:
         await self.execute_cypher("CREATE CONSTRAINT nexus_node_id IF NOT EXISTS FOR (n:NexusNode) REQUIRE n.id IS UNIQUE")
         # Indices for common search properties
         await self.execute_cypher("CREATE INDEX node_name_idx IF NOT EXISTS FOR (n:NexusNode) ON (n.name)")
+        
+        # Setup Vector Indices for Hybrid Search
+        await self.setup_vector_indices()
+        
         db_logger.info("Neo4j constraints configured.")
+
+    async def setup_vector_indices(self):
+        """Create vector indices for all existing labels to enable hybrid search."""
+        labels_raw = await self.run_query("CALL db.labels() YIELD label RETURN label")
+        for l in labels_raw:
+            label = l["label"]
+            if label.startswith("Folder_") or label == "NexusNode": continue
+            
+            idx_name = f"vector_{label.lower()}"
+            # Check if index exists first to avoid unnecessary noise
+            exists = await self.run_query(f"SHOW INDEXES YIELD name WHERE name = '{idx_name}' RETURN name")
+            if not exists:
+                db_logger.info(f"Creating vector index: {idx_name}")
+                await self.execute_cypher(f"""
+                    CREATE VECTOR INDEX `{idx_name}` IF NOT EXISTS
+                    FOR (n:`{label}`) ON (n.embedding)
+                    OPTIONS {{
+                      indexConfig: {{
+                        `vector.dimensions`: 384,
+                        `vector.similarity_function`: 'cosine'
+                      }}
+                    }}
+                """)
 
     async def get_schema_info(self):
         """Get full schema info — labels, properties, relationships, counts."""
@@ -64,11 +91,28 @@ class Neo4jService:
             RETURN relType, collect(propertyName) as properties
         """)
 
+        # Get relationship triplets (startNodeLabel)-[:TYPE]->(endNodeLabel)
+        triplets = await self.run_query("""
+            CALL db.schema.visualization() YIELD nodes, relationships
+            UNWIND relationships as rel
+            WITH rel, startNode(rel) as s, endNode(rel) as e
+            RETURN apoc.coll.toSet(labels(s))[0] as start, type(rel) as type, apoc.coll.toSet(labels(e))[0] as end
+        """)
+        # Fallback if apoc is missing or visualization is empty
+        if not triplets:
+            triplets = await self.run_query("""
+                MATCH (n)-[r]->(m)
+                WITH labels(n)[0] as start, type(r) as type, labels(m)[0] as end
+                RETURN DISTINCT start, type, end
+                LIMIT 50
+            """)
+
         return {
             "labels": [l["label"] for l in labels],
             "relationships": [r["relationshipType"] for r in rels],
             "node_properties": {p["nodeType"]: p["properties"] for p in node_props},
-            "relationship_properties": {p["relType"]: p["properties"] for p in rel_props}
+            "relationship_properties": {p["relType"]: p["properties"] for p in rel_props},
+            "triplets": triplets
         }
 
     async def get_label_counts(self):
@@ -217,7 +261,7 @@ class Neo4jService:
         from app.services.gemini_service import gemini_service
         import asyncio
         batch_size = 500
-        folder_match = f":Folder_{folder_id}" if folder_id else ""
+        folder_match = f":`Folder_{folder_id}`" if folder_id else ""
         
         while True:
             # elementId usage for precision

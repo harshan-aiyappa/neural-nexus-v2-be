@@ -119,3 +119,16 @@ async def ingest_excel(
     # Use Excel service for complex mapping
     result = await excel_service.process_and_ingest(df, folder_id)
     return {"status": "Success", "details": result}
+
+@router.post("/process-embeddings")
+async def process_embeddings(
+    background_tasks: BackgroundTasks,
+    folder_id: str = Form(None),
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Trigger the background task to generate embeddings for nodes that are missing them.
+    Can be scoped to a specific folder or run globally.
+    """
+    background_tasks.add_task(neo4j_service.process_embeddings_batch, folder_id)
+    return {"status": "Processing", "message": f"Embedding generation started for {'folder ' + folder_id if folder_id else 'all folders'}"}
