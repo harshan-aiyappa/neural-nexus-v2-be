@@ -64,8 +64,14 @@ async def lifespan(app: FastAPI):
         status = "❌ FAILED (Expired/Invalid)" if "expired" in err_msg or "400" in err_msg else f"❌ FAILED ({str(e)[:20]})"
         services_status.append(("Gemini API", "Cloud", status))
 
+    # 5. Trigger Background Embedding Backfill (Step ID: 226)
+    if all(s[2] == "✅ OK" for s in services_status if s[0] in ["Neo4j", "Gemini API"]):
+        import asyncio
+        asyncio.create_task(neo4j_service.process_embeddings_batch())
+        logger.info("[INIT] Neo4j Embedding Backfill started in background")
+
     # Log Service Dashboard
-    dashboard = ["\n" + "="*60, "       NEURAL NEXUS V2 - SERVICE CONNECTIVITY DASHBOARD", "="*60, f"{'SERVICE':<15} | {'URI/LOCATION':<30} | {'STATUS'}", "-" * 60]
+    dashboard = ["\n" + "="*60, "       NEURAL NEXUS - SERVICE CONNECTIVITY DASHBOARD", "="*60, f"{'SERVICE':<15} | {'URI/LOCATION':<30} | {'STATUS'}", "-" * 60]
     for name, uri, status in services_status:
         short_uri = (uri[:27] + "...") if len(uri) > 30 else uri
         dashboard.append(f"{name:<15} | {short_uri:<30} | {status}")
@@ -80,9 +86,27 @@ async def lifespan(app: FastAPI):
     logger.info("[OK] Database connections closed")
 
 app = FastAPI(
-    title="Neural Nexus V2 - Scientific Knowledge Graph",
-    description="Research platform with Modular RBAC and Graph RAG",
-    version="2.0.0",
+    title="Nexus Knowledge Atlas API",
+    description="""
+    The core intelligence engine for the Nexus Knowledge Atlas.
+    
+    ### Features:
+    * **Graph RAG**: Advanced 1-hop and 2-hop contextual reasoning.
+    * **Universal Ingestion**: PDF, CSV, and Excel processing via Gemini.
+    * **GDS Analytics**: Community detection, PageRank, and pathfinding.
+    * **Vector Search**: 768D semantic indexing for every entity.
+    """,
+    version="2.1.0",
+    terms_of_service="http://example.com/terms/",
+    contact={
+        "name": "Nexus Core Team",
+        "url": "http://nexus-research.io/support",
+        "email": "core@nexus-research.io",
+    },
+    license_info={
+        "name": "Apache 2.0",
+        "url": "https://www.apache.org/licenses/LICENSE-2.0.html",
+    },
     lifespan=lifespan,
 )
 
@@ -96,12 +120,12 @@ app.add_middleware(
 )
 
 # Root/Health
-@app.get("/", tags=["Health"])
+@app.get("/", tags=["Health"], summary="System Insight", description="Returns basic system status, version, and security handshake status.")
 async def root():
     return {
-        "status": "Neural Nexus V2 API running", 
-        "version": "2.0.0",
-        "master_standard": "Native Labels & Symmetry Guardian active"
+        "status": "Nexus Knowledge Atlas API active", 
+        "version": "2.1.0",
+        "integrity": "Native Labels & Symmetry Guardian active"
     }
 
 # Register Routers

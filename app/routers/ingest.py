@@ -13,7 +13,7 @@ from app.core.security import get_current_user
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
-@router.post("/upload-cypher")
+@router.post("/upload-cypher", summary="Bulk Protocol Commit", description="Upload and execute a large Cypher transaction directly into the Knowledge Graph.")
 async def upload_cypher(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
@@ -34,12 +34,13 @@ async def upload_cypher(
     background_tasks.add_task(
         ingest_service.ingest_cypher_bulk, 
         cypher_text, 
-        folder_id
+        folder_id,
+        user_email=current_user.get("email", "System")
     )
     
     return {"status": "Processing", "filename": file.filename, "folder": folder_id}
 
-@router.post("/extract")
+@router.post("/extract", summary="LLM Knowledge Distillation", description="Directly extract entities and relationships from raw text using the Gemini reasoning engine.")
 async def extract_knowledge(request: ExtractionRequest, current_user: dict = Depends(get_current_user)):
     """
     Hybrid Extraction:
@@ -89,21 +90,22 @@ async def get_task_status(task_id: str, current_user: dict = Depends(get_current
         logger.error(f"Task status retrieval error: {e}")
         raise HTTPException(status_code=500, detail="Task tracking unavailable (Redis offline)")
 
-@router.post("/ingest")
+@router.post("/ingest", summary="Structured Knowledge Committal", description="Inject pre-processed nodes and relationships into the graph with Symmetry Guardian validation.")
 async def ingest_knowledge(request: IngestionRequest, current_user: dict = Depends(get_current_user)):
     """Ingest nodes and relationships into a folder with Symmetry Guardian protection."""
     try:
         result = await ingest_service.ingest_nodes_rels(
             request.nodes, 
             request.relationships, 
-            request.folder_id
+            request.folder_id,
+            user_email=current_user.get("email", "System")
         )
         return result
     except Exception as e:
         logger.error(f"Ingestion error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.post("/excel")
+@router.post("/excel", summary="Tabular Data Ingestion", description="Transform and upload CSV/XLSX data into the graph schema automatically.")
 async def ingest_excel(
     file: UploadFile = File(...),
     folder_id: str = Form(...),
@@ -119,7 +121,6 @@ async def ingest_excel(
     # Use Excel service for complex mapping
     result = await excel_service.process_and_ingest(df, folder_id)
     return {"status": "Success", "details": result}
-
 @router.post("/process-embeddings")
 async def process_embeddings(
     background_tasks: BackgroundTasks,
@@ -132,3 +133,40 @@ async def process_embeddings(
     """
     background_tasks.add_task(neo4j_service.process_embeddings_batch, folder_id)
     return {"status": "Processing", "message": f"Embedding generation started for {'folder ' + folder_id if folder_id else 'all folders'}"}
+
+@router.post("/universal", summary="Multimodal Intelligence Upload", description="Unified entry point for PDF, CSV, Excel, and Text files with automated AI reasoning.")
+async def universal_upload(
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
+    folder_id: str = Form(...),
+    use_ai: bool = Form(True),
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Universal Upload Endpoint:
+    - Accepts PDF, CSV, XLSX, TXT, CYPHER.
+    - Triggers Gemini-powered extraction and vector storage.
+    """
+    allowed_ext = ('.pdf', '.csv', '.xlsx', '.txt', '.cypher')
+    if not file.filename.lower().endswith(allowed_ext):
+        raise HTTPException(status_code=400, detail=f"Unsupported file format. Allowed: {allowed_ext}")
+    
+    content = await file.read()
+    
+    # Process with IngestService
+    background_tasks.add_task(
+        ingest_service.ingest_from_any_source, 
+        content, 
+        file.filename, 
+        folder_id,
+        user_email=current_user.get("email", "System"),
+        use_ai=use_ai
+    )
+    
+    return {
+        "status": "Processing", 
+        "filename": file.filename, 
+        "folder": folder_id,
+        "mode": "ai_enhanced" if use_ai else "direct"
+    }
+

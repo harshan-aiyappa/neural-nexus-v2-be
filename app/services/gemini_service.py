@@ -60,17 +60,26 @@ class GeminiService:
     async def generate_embeddings_batch(self, texts: List[str]) -> List[List[float]]:
         """
         Generates embeddings for a batch of texts using text-embedding-004.
+        Complies with Gemini's 100-request limit per batch.
         """
+        if not texts: return []
+        
+        # Gemini embedding batch limit is 100
+        GEMINI_BATCH_LIMIT = 100
+        all_embeddings = []
+        
         try:
-            if not texts: return []
-            ai_logger.info(f"Generating embeddings for batch of {len(texts)} texts...")
-            result = self.client.models.embed_content(
-                model='text-embedding-004',
-                contents=texts
-            )
-            # Assuming newest client returns a list of embeddings.
-            embeddings = [emb.values for emb in result.embeddings]
-            return embeddings
+            for i in range(0, len(texts), GEMINI_BATCH_LIMIT):
+                chunk = texts[i:i + GEMINI_BATCH_LIMIT]
+                ai_logger.info(f"Generating embeddings for chunk of {len(chunk)} texts...")
+                result = self.client.models.embed_content(
+                    model='models/gemini-embedding-001',
+                    contents=chunk
+                )
+                chunk_embeddings = [emb.values for emb in result.embeddings]
+                all_embeddings.extend(chunk_embeddings)
+            
+            return all_embeddings
         except Exception as e:
             ai_logger.error(f"Error generating embeddings batch: {e}")
             return []

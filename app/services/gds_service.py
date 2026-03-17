@@ -64,6 +64,7 @@ class GDSService:
     async def get_pagerank(self, folder_id: Optional[str] = None):
         """
         Indirected Influence Scoring: Identifies critical hub entities via heterogeneous links.
+        Uses a Cypher-based proxy for PageRank (Degree Centrality + Hub Score).
         """
         fid = folder_id or "global"
         cache_key = f"gds:pagerank:{fid}"
@@ -78,13 +79,26 @@ class GDSService:
         query = f"""
         MATCH (n{label_filter})
         OPTIONAL MATCH (n)-[r]-(m{label_filter})
-        WITH n, count(DISTINCT r) as hub_score
-        RETURN coalesce(n.name, n.id) as name, labels(n)[0] as type, hub_score as score
+        WITH n, count(DISTINCT r) as degree
+        RETURN coalesce(n.name, n.id) as name, labels(n)[0] as type, toFloat(degree) as score
         ORDER BY score DESC
         LIMIT 50
         """
         result = await neo4j_service.run_query(query)
         cache_service.set(cache_key, result, expire=1800)
         return result
+
+    async def find_shortest_path(self, start_id: str, end_id: str):
+        """
+        Visual Pathfinding: Finds the shortest connection between two disparate entities.
+        """
+        query = """
+        MATCH (start), (end)
+        WHERE elementId(start) = $start_id AND elementId(end) = $end_id
+        MATCH p = shortestPath((start)-[*]-(end))
+        RETURN nodes(p) as nodes, relationships(p) as links
+        """
+        result = await neo4j_service.run_query(query, {"start_id": start_id, "end_id": end_id})
+        return result[0] if result else {"nodes": [], "links": []}
 
 gds_service = GDSService()

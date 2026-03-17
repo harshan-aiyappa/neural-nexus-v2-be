@@ -60,15 +60,15 @@ class MongoDBService:
         collection = self.db.get_collection("folders")
         await collection.delete_one({"_id": ObjectId(folder_id)})
 
-    async def save_chat_history(self, user_id: str, message: str, response: str):
-        """Persist discovery chat history."""
+    async def save_chat_message(self, chat_data: Dict):
+        """Persist discovery chat history with embeddings."""
         collection = self.db.get_collection("chat_history")
-        await collection.insert_one({
-            "user_id": user_id,
-            "message": message,
-            "response": response,
-            "timestamp": "..." # Replace with actual timestamp logic if needed
-        })
+        # Ensure timestamp is current if not provided
+        if "timestamp" not in chat_data:
+            from datetime import datetime
+            chat_data["timestamp"] = datetime.utcnow().isoformat()
+        
+        await collection.insert_one(chat_data)
 
     async def get_recent_activity(self) -> List[Dict]:
         """Synthesize recent activity from folders and documents."""

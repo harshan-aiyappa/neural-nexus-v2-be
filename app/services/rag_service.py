@@ -24,7 +24,7 @@ class UndirectedRAGService:
         )
         ai_logger.info("Undirected RAG Service initialized with Gemini & Neo4j Service.")
 
-    async def _get_undirected_context(self, query: str, folder_slug: str = None) -> List[str]:
+    async def _get_undirected_context(self, query: str, folder_slug: str | None = None) -> List[str]:
         """
         Retrieves context by traversing edges in BOTH directions.
         Uses semantic folder label for FAST indexing and isolation if provided.
@@ -57,7 +57,7 @@ class UndirectedRAGService:
         context_str = "\n".join(context)
         
         prompt = f"""
-        You are the Neural Nexus V2 AI. You have access to a bi-directional Knowledge Graph.
+        You are the Neural Nexus AI. You have access to a bi-directional Knowledge Graph.
         
         CONTEXT FROM GRAPH (BI-DIRECTIONAL):
         {context_str}

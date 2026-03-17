@@ -3,10 +3,11 @@ from typing import Optional, List, Dict, Any
 from app.services.neo4j_service import neo4j_service
 from app.services.gds_service import gds_service
 from app.core.security import get_current_user
+from app.services.audit_service import audit_service
 
 router = APIRouter()
 
-@router.get("/flow", dependencies=[Depends(get_current_user)])
+@router.get("/flow", dependencies=[Depends(get_current_user)], summary="Inter-Label Relationship Density", description="Analyzes how different entity types (Herbs, Chemicals, etc.) flow into one another for Sankey visualizations.")
 async def get_flow_data(folder: Optional[str] = None):
     """
     Returns Sankey-compatible flow data by analyzing relationship densities between labels.
@@ -40,7 +41,7 @@ async def get_flow_data(folder: Optional[str] = None):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/metrics", dependencies=[Depends(get_current_user)])
+@router.get("/metrics", dependencies=[Depends(get_current_user)], summary="Network Topology Radar", description="Calculates Density, Influence, and Modularity scores for the current research folder.")
 async def get_network_metrics(folder: Optional[str] = None):
     """
     Returns Radar-compatible network metrics using GDS community and influence scores.
@@ -87,3 +88,27 @@ async def get_network_metrics(folder: Optional[str] = None):
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/path", dependencies=[Depends(get_current_user)], summary="Visual Pathfinding", description="Finds the shortest semantic chain between any two entities in the knowledge graph.")
+async def find_path(start_id: str, end_id: str):
+    try:
+        return await gds_service.find_shortest_path(start_id, end_id)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/communities", dependencies=[Depends(get_current_user)], summary="Community Clustering", description="Identifies densely connected clusters and thematic islands using cross-domain path analysis.")
+async def get_communities(folder: Optional[str] = None):
+    try:
+        return await gds_service.get_communities(folder_id=folder)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/activity", dependencies=[Depends(get_current_user)], summary="Enterprise Activity Stream", description="Returns the global audit trail of all ingestion and graph modification events for collaborative awareness.")
+async def get_activity_stream(limit: int = 50):
+    """
+    Returns the most recent structural changes and user interactions.
+    """
+    try:
+        return await audit_service.get_activity_stream(limit)
+    except Exception as e:
+        return []

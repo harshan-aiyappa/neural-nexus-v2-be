@@ -54,6 +54,6 @@ def setup_logger(name: str):
     return logger
 
 # Global loggers
-logger = setup_logger("NeuralNexusV2")
+logger = setup_logger("NeuralNexus")
 db_logger = setup_logger("Database")
 ai_logger = setup_logger("AIService")
