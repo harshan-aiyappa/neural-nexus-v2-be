@@ -15,12 +15,12 @@ class KeyUpdateRequest(BaseModel):
     key_name: str
     key_value: str
 
-@router.post("/update-key", dependencies=[admin_only])
+@router.post("/update-key", dependencies=[admin_only], summary="Secret Key Rotation", description="Updates sensitive environmental variables (Gemini API Key, Neo4j Password) with automatic .env persistence.")
 async def update_api_key(request: KeyUpdateRequest):
     """
     Dynamically update environmental keys.
     Note: For production, this should update a secret manager or a persistent store.
-    For this V2 prototype, we will update the .env if writable, and the current os.environ.
+    For this prototype, we will update the .env if writable, and the current os.environ.
     """
     if request.key_name not in ["GEMINI_API_KEY", "NEO4J_PASSWORD", "MONGODB_URI"]:
         raise HTTPException(status_code=400, detail="Restricted key update")
@@ -54,7 +54,7 @@ import asyncio
 class KeyVerifyRequest(BaseModel):
     key_value: str
 
-@router.post("/verify-key", dependencies=[admin_only])
+@router.post("/verify-key", dependencies=[admin_only], summary="Key Health Check", description="Performs a dry-run API call using the provided key string to verify its operational status before persistence.")
 async def verify_api_key(request: KeyVerifyRequest):
     """Attempt to use the provided key with a lightweight model call."""
     model_name = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
@@ -66,7 +66,7 @@ async def verify_api_key(request: KeyVerifyRequest):
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Key validation failed: {str(e)}")
 
-@router.get("/status")
+@router.get("/status", summary="Infrastructure Pulse", description="Returns real-time connectivity states for Gemini, Neo4j, MongoDB, and Redis clusters.")
 async def get_system_status():
     """Get real-time connectivity status of all external services."""
     status = {
