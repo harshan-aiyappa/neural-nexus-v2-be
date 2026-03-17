@@ -57,6 +57,11 @@ class GeminiService:
             ai_logger.error(f"Error during Gemini extraction: {e}")
             return {"nodes": [], "relationships": []}
 
+    async def generate_embeddings(self, text: str) -> List[float]:
+        """Generates embeddings for a single piece of text."""
+        result = await self.generate_embeddings_batch([text])
+        return result[0] if result else []
+
     async def generate_embeddings_batch(self, texts: List[str]) -> List[List[float]]:
         """
         Generates embeddings for a batch of texts using text-embedding-004.

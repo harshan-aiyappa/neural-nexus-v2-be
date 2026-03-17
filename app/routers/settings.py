@@ -73,7 +73,8 @@ async def get_system_status():
         "gemini": "OFFLINE",
         "neo4j": "OFFLINE",
         "mongodb": "OFFLINE",
-        "redis": "OFFLINE"
+        "redis": "OFFLINE",
+        "celery": "OFFLINE"
     }
 
     # 1. Neo4j Check
@@ -109,5 +110,14 @@ async def get_system_status():
             status["gemini"] = "ACTIVE"
     except:
         pass
+
+    # 5. Celery Check
+    try:
+        from app.core.celery_app import celery_app
+        inspect = celery_app.control.inspect(timeout=0.5)
+        pings = inspect.ping()
+        status["celery"] = "ACTIVE" if pings else "IDLE"
+    except:
+        status["celery"] = "ERROR"
 
     return status

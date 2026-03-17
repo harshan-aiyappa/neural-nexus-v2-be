@@ -64,7 +64,20 @@ async def lifespan(app: FastAPI):
         status = "❌ FAILED (Expired/Invalid)" if "expired" in err_msg or "400" in err_msg else f"❌ FAILED ({str(e)[:20]})"
         services_status.append(("Gemini API", "Cloud", status))
 
-    # 5. Trigger Background Embedding Backfill (Step ID: 226)
+    # 5. Verify Celery Worker
+    from app.core.celery_app import celery_app
+    try:
+        # Ping is more reliable for quick startup checks
+        inspect = celery_app.control.inspect(timeout=1.0)
+        pings = inspect.ping()
+        if pings:
+            services_status.append(("Celery", f"Active ({len(pings)} workers)", "✅ OK"))
+        else:
+            services_status.append(("Celery", "Broker Only", "⚠️ WARNING (Idle/Off)"))
+    except Exception as e:
+        services_status.append(("Celery", "Not Configured", f"❌ FAILED ({str(e)[:20]})"))
+
+    # 6. Trigger Background Embedding Backfill (Step ID: 226)
     if all(s[2] == "✅ OK" for s in services_status if s[0] in ["Neo4j", "Gemini API"]):
         import asyncio
         asyncio.create_task(neo4j_service.process_embeddings_batch())

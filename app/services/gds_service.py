@@ -18,7 +18,7 @@ class GDSService:
         
         db_logger.info(f"GDS Similarity: Cache miss for {fid}. Computing...")
 
-        label_filter = f":Folder_{folder_id}" if folder_id else ""
+        label_filter = f":`Folder_{folder_id}`" if folder_id else ""
         # Multi-way overlap: Herb -> Compound -> (Same) Compound -> Herb
         query = f"""
         MATCH (h1:Herb{label_filter})-[:CONTAINS]->(c:Chemical{label_filter})<-[:CONTAINS]-(h2:Herb{label_filter})
@@ -50,7 +50,7 @@ class GDSService:
         
         db_logger.info(f"GDS Communities: Cache miss for {fid}. Computing...")
 
-        label_filter = f":Folder_{folder_id}" if folder_id else ""
+        label_filter = f":`Folder_{folder_id}`" if folder_id else ""
         query = f"""
         MATCH (n{label_filter})-[*1..2]-(m{label_filter})
         WITH n, labels(n)[0] as type, count(DISTINCT labels(m)[0]) as diversity
@@ -75,7 +75,7 @@ class GDSService:
         
         db_logger.info(f"GDS PageRank: Cache miss for {fid}. Computing...")
 
-        label_filter = f":Folder_{folder_id}" if folder_id else ""
+        label_filter = f":`Folder_{folder_id}`" if folder_id else ""
         query = f"""
         MATCH (n{label_filter})
         OPTIONAL MATCH (n)-[r]-(m{label_filter})

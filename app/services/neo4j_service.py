@@ -127,7 +127,7 @@ class Neo4jService:
             CALL db.schema.visualization() YIELD nodes, relationships
             UNWIND relationships as rel
             WITH rel, startNode(rel) as s, endNode(rel) as e
-            RETURN apoc.coll.toSet(labels(s))[0] as start, type(rel) as type, apoc.coll.toSet(labels(e))[0] as end
+            RETURN labels(s)[0] as start, type(rel) as type, labels(e)[0] as end
         """)
         # Fallback if apoc is missing or visualization is empty
         if not triplets:
@@ -198,7 +198,7 @@ class Neo4jService:
         # This avoid re-declaring variables like (h) which was causing syntax errors.
         scoped_cypher = re.sub(
             r'\(([\w\d]+):([\w\d:]+)', 
-            r'(\1:\2:TherapeuticUse:`' + folder_label + '`', 
+            r'(\1:\2:TherapeuticUse:`' + folder_label + '`)', 
             cypher
         )
         return await self.execute_cypher(scoped_cypher)

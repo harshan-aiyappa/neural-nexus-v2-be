@@ -97,7 +97,7 @@ class EnhancedRAGService:
         schema_text = await self._get_schema_text()
         slug = state.get('folder_slug')
         
-        folder_restriction = f"CRITICAL: ALL nodes in the query MUST have the label :Folder_{slug}. Example: MATCH (n:Herb:Folder_{slug})-[r]->(m:Folder_{slug})" if slug else ""
+        folder_restriction = f"CRITICAL: ALL nodes in the query MUST have the label :`Folder_{slug}`. Note the backticks are REQUIRED for labels with hyphens. Example: MATCH (n:Herb:`Folder_{slug}`) " if slug else ""
         
         system_prompt = "You are a Neo4j Cypher expert for scientific knowledge graphs. Generate ONLY raw Cypher. No markdown, no comments."
         user_prompt = f"""
@@ -110,8 +110,9 @@ RULES:
 1. Return results as plain names and relationship types.
 2. {folder_restriction}
 3. Use toLower() for string comparisons.
-4. Limit to 15 results.
-5. If the question is a greeting or general chat, return "NONE".
+4. ONLY USE properties that are VISIBLE in the SCHEMA below. Do NOT guess properties like 'formula' or 'weight' unless listed.
+5. Limit to 15 results.
+6. If the question is a greeting or general chat, return "NONE".
 
 CYPHER QUERY:"""
         
@@ -151,7 +152,7 @@ CYPHER QUERY:"""
         """Perform hybrid vector/keyword search for nodes."""
         query = state['query']
         slug = state.get('folder_slug')
-        folder_filter = f":Folder_{slug}" if slug else ""
+        folder_filter = f":`Folder_{slug}`" if slug else ""
         
         context = ""
         try:
@@ -161,7 +162,7 @@ CYPHER QUERY:"""
                 vector_query = f"""
                 MATCH (n{folder_filter})
                 WHERE n.embedding IS NOT NULL
-                WITH n, gds.similarity.cosine(n.embedding, $emb) AS score
+                WITH n, vector.similarity.cosine(n.embedding, $emb) AS score
                 WHERE score > 0.7
                 RETURN coalesce(n.name, n.id) as name, labels(n)[0] as type, n.description as desc, score
                 ORDER BY score DESC
