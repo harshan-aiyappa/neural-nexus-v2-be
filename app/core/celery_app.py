@@ -10,7 +10,7 @@ celery_app = Celery(
     "neural_nexus",
     broker=REDIS_URL,
     backend=REDIS_URL,
-    include=["app.services.gemini_service", "app.services.ingest_service"] # Register tasks here
+    include=["app.services.gemini_service", "app.services.ingest_service", "app.tasks.graph_tasks"] # Register tasks here
 )
 
 celery_app.conf.update(

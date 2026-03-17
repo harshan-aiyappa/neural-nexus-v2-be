@@ -7,7 +7,7 @@ from datetime import timedelta
 
 router = APIRouter()
 
-@router.post("/register", response_model=Token)
+@router.post("/register", response_model=Token, summary="User Onboarding", description="Registers a new research entity with a specific role and generates an initial access token.")
 async def register(user: UserRegister):
     # Check if user exists in Mongo
     collection = mongo_service.db.get_collection("users")
@@ -29,7 +29,7 @@ async def register(user: UserRegister):
     )
     return {"access_token": access_token, "token_type": "bearer", "role": user.role}
 
-@router.post("/login", response_model=Token)
+@router.post("/login", response_model=Token, summary="System Access", description="Authenticates credentials and issues a bearer token for secure session management.")
 async def login(form_data: OAuth2PasswordRequestForm = Depends()):
     collection = mongo_service.db.get_collection("users")
     user = await collection.find_one({"email": form_data.username})
@@ -46,6 +46,6 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends()):
     )
     return {"access_token": access_token, "token_type": "bearer", "role": user["role"]}
 
-@router.get("/me")
+@router.get("/me", summary="Identity Verification", description="Decodes the current session's token to return investigator identity and authorization level.")
 async def read_users_me(current_user: TokenData = Depends(get_current_user)):
     return current_user

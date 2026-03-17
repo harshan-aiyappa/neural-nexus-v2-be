@@ -8,7 +8,7 @@ router = APIRouter()
 # Allow all researchers to manage folders
 researcher_only = Depends(RoleChecker(["ADMIN", "RESEARCHER"]))
 
-@router.get("/", dependencies=[Depends(get_current_user)])
+@router.get("/", dependencies=[Depends(get_current_user)], summary="Fetch All Topics", description="Returns a list of all research folders with their metadata and live node counts.")
 async def get_folders():
     from app.services.neo4j_service import neo4j_service
     folders = await mongo_service.get_all_folders()
@@ -21,12 +21,12 @@ async def get_folders():
         
     return folders
 
-@router.post("/", dependencies=[researcher_only])
+@router.post("/", dependencies=[researcher_only], summary="Create Topic", description="Initializes a new research space with a name and optional description.")
 async def create_folder(folder: FolderCreate):
     folder_id = await mongo_service.create_folder(folder.name, folder.description)
     return {"id": folder_id, "name": folder.name}
 
-@router.delete("/{folder_id}", dependencies=[researcher_only])
+@router.delete("/{folder_id}", dependencies=[researcher_only], summary="Delete Topic", description="Permanently removes a research folder and all its associated metadata from the system.")
 async def delete_folder(folder_id: str):
     await mongo_service.delete_folder(folder_id)
     return {"status": "success"}

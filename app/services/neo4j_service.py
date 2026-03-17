@@ -4,6 +4,7 @@ import time
 import re
 from typing import List, Dict, Any, Optional
 from app.logging_utils import db_logger
+from app.services.audit_service import audit_service
 
 class Neo4jService:
     def __init__(self):
@@ -49,12 +50,32 @@ class Neo4jService:
             return []
 
     async def setup_constraints(self):
-        """Pre-configure Neo4j with uniqueness constraints for performance and integrity."""
+        """Pre-configure Neo4j with uniqueness constraints and vector indices."""
         db_logger.info("Configuring Neo4j indices and constraints...")
         # Constraint on base label for global ID lookup
         await self.execute_cypher("CREATE CONSTRAINT therapeutic_use_id IF NOT EXISTS FOR (n:TherapeuticUse) REQUIRE n.id IS UNIQUE")
         # Indices for common search properties
         await self.execute_cypher("CREATE INDEX therapeutic_use_name_idx IF NOT EXISTS FOR (n:TherapeuticUse) ON (n.name)")
+        
+        # New: Setup Vector Index for Semantic RAG (Step ID: 958)
+        # Dimensions: 768 for models/gemini-embedding-001
+        try:
+            vector_q = """
+            CREATE VECTOR INDEX node_embeddings IF NOT EXISTS
+            FOR (n:TherapeuticUse)
+            ON (n.embedding)
+            OPTIONS {
+              indexConfig: {
+                `vector.dimensions`: 768,
+                `vector.similarity_function`: 'cosine'
+              }
+            }
+            """
+            await self.execute_cypher(vector_q)
+            db_logger.info("Neo4j Vector Index 'node_embeddings' configured.")
+        except Exception as e:
+            db_logger.warning(f"Vector index creation issues (likely already exists or unsupported version): {e}")
+
         db_logger.info("Neo4j constraints configured.")
 
     async def get_schema_info(self):
@@ -245,7 +266,10 @@ class Neo4jService:
         return res_counts
 
     async def merge_entities_with_guardian(self, nodes: List[Dict], relationships: List[Dict], folder_id: str):
-        """Ingest nodes and relationships with label scoping inside a single transaction function."""
+        """
+        Ingest nodes and relationships with label scoping. 
+        Note: Auditing is handled by the caller (IngestService).
+        """
         folder_label = f"Folder_{folder_id}"
         
         async def _ingest_tx(tx):
@@ -327,5 +351,85 @@ class Neo4jService:
                 await session.execute_write(_persist_tx)
         except Exception as e:
             db_logger.error(f"Neo4j chat persistence failed: {e}")
+
+    async def update_node(self, node_id: str, properties: Dict, user_email: str = "System"):
+        """Update node properties and log audit event."""
+        query = "MATCH (n) WHERE elementId(n) = $id SET n += $props RETURN n"
+        result = await self.run_write_query(query, {"id": node_id, "props": properties})
+        await audit_service.log_event(
+            user_email=user_email,
+            action="UPDATE",
+            resource_type="NODE",
+            resource_id=node_id,
+            details=properties
+        )
+        return result
+
+    async def delete_node(self, node_id: str, user_email: str = "System"):
+        """Delete node and log audit event."""
+        query = "MATCH (n) WHERE elementId(n) = $id DETACH DELETE n"
+        result = await self.run_write_query(query, {"id": node_id})
+        await audit_service.log_event(
+            user_email=user_email,
+            action="DELETE",
+            resource_type="NODE",
+            resource_id=node_id
+        )
+        return result
+
+    async def create_relationship(self, source_id: str, target_id: str, rel_type: str, properties: Optional[Dict] = None, user_email: str = "System"):
+        """Create a new directed relationship and log audit event."""
+        safe_type = re.sub(r'[^a-zA-Z0-9_]', '_', rel_type).upper()
+        query = f"""
+        MATCH (a), (b)
+        WHERE elementId(a) = $sid AND elementId(b) = $tid
+        CREATE (a)-[r:{safe_type} $props]->(b)
+        RETURN elementId(r) as rel_id
+        """
+        result = await self.run_write_query(query, {"sid": source_id, "tid": target_id, "props": properties or {}})
+        if result:
+            await audit_service.log_event(
+                user_email=user_email,
+                action="CREATE",
+                resource_type="RELATIONSHIP",
+                resource_id=result[0]["rel_id"],
+                details={"source": source_id, "target": target_id, "type": rel_type}
+            )
+        return result
+
+    async def update_relationship(self, rel_id: str, new_type: Optional[str] = None, properties: Optional[Dict] = None):
+        """Update relationship properties. If type changes, re-create it."""
+        if not new_type:
+            # Simple property update
+            query = "MATCH ()-[r]->() WHERE elementId(r) = $id SET r += $props RETURN r"
+            return await self.run_write_query(query, {"id": rel_id, "props": properties or {}})
+        else:
+            # Change type: must delete and recreate
+            safe_type = re.sub(r'[^a-zA-Z0-9_]', '_', new_type).upper()
+            recreate_query = f"""
+            MATCH (a)-[r]->(b)
+            WHERE elementId(r) = $id
+            WITH a, b, properties(r) as old_props
+            DELETE r
+            CREATE (a)-[new_r:{safe_type}]->(b)
+            SET new_r = old_props
+            SET new_r += $new_props
+            RETURN elementId(new_r) as new_id
+            """
+            result = await self.run_write_query(recreate_query, {"id": rel_id, "new_props": properties or {}})
+            # Audit will target the NEW rel_id or old if simple update
+            return result
+
+    async def delete_relationship(self, rel_id: str, user_email: str = "System"):
+        """Delete a specific relationship and log audit event."""
+        query = "MATCH ()-[r]->() WHERE elementId(r) = $id DELETE r"
+        result = await self.run_write_query(query, {"id": rel_id})
+        await audit_service.log_event(
+            user_email=user_email,
+            action="DELETE",
+            resource_type="RELATIONSHIP",
+            resource_id=rel_id
+        )
+        return result
 
 neo4j_service = Neo4jService()

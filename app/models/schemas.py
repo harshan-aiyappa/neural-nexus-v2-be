@@ -42,3 +42,16 @@ class DeepAnalyzeRequest(BaseModel):
     folder_slug: Optional[str] = None
     node_name: Optional[str] = None
     node_label: Optional[str] = None
+
+class NodeUpdateRequest(BaseModel):
+    properties: Dict[str, Any]
+
+class RelationshipCreateRequest(BaseModel):
+    source_id: str
+    target_id: str
+    rel_type: str
+    properties: Optional[Dict[str, Any]] = None
+
+class RelationshipUpdateRequest(BaseModel):
+    rel_type: Optional[str] = None
+    properties: Optional[Dict[str, Any]] = None
