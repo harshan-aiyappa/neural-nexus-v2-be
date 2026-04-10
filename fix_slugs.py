@@ -2,7 +2,7 @@ from pymongo import MongoClient
 import os
 
 def fix_slugs():
-    mc = MongoClient('mongodb://10.10.20.122:27017')
+    mc = MongoClient('mongodb://10.10.20.144:27017')
     db = mc.neural_nexus_v2
     collection = db.get_collection("folders")
     

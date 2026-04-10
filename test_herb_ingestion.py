@@ -8,7 +8,7 @@ async def trigger_ingestion():
     async with httpx.AsyncClient(timeout=600.0) as client:
         # 1. Create a folder for the Herb data
         print("Creating 'Herb Knowledge' folder...")
-        folder_resp = await client.post("http://10.10.20.122:8000/folders", json={
+        folder_resp = await client.post("http://10.10.20.144:8000/folders", json={
             "name": "Herb Knowledge",
             "description": "Ingestion from Herb modelling example data.xlsx"
         })
@@ -22,7 +22,7 @@ async def trigger_ingestion():
         
         # 2. Trigger Excel Ingestion
         print(f"Triggering ingestion for: {file_path}")
-        ingest_resp = await client.post("http://10.10.20.122:8000/ingest/excel", json={
+        ingest_resp = await client.post("http://10.10.20.144:8000/ingest/excel", json={
             "file_path": file_path,
             "folder_id": folder_id
         })

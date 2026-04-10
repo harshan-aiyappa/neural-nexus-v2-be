@@ -12,6 +12,9 @@ import re
 def slugify(text):
     return re.sub(r'[\W_]+', '_', text).upper()
 
+from typing import List, Dict, Optional
+import asyncio
+
 async def clear_and_sync_semantic():
     print("Cleaning Mongo data...")
     await mongo_service.db.get_collection("folders").delete_many({})
@@ -39,7 +42,7 @@ def transform_cypher(cypher, slug):
     
     return cypher
 
-def seed():
+async def seed():
     print("--- Starting Semantic Database Seeding ---")
     cypher_path = os.path.join(os.path.dirname(__file__), "seed_data.cypher")
     
@@ -52,19 +55,18 @@ def seed():
 
     # Clear Neo4j
     print("Cleaning existing graph data...")
-    neo4j_service.run_query("MATCH (n) DETACH DELETE n")
+    await neo4j_service.run_write_query("MATCH (n) DETACH DELETE n")
     
     # Handle Mongo and get folder info
-    import asyncio
-    folders = asyncio.run(clear_and_sync_semantic())
+    folders = await clear_and_sync_semantic()
 
     # Apply data for each folder with its own namespace
     for folder in folders:
         print(f"Seeding folder: {folder['name']} (Label: Folder_{folder['slug']})")
         semantic_cypher = transform_cypher(original_cypher, folder['slug'])
-        neo4j_service.execute_cypher(semantic_cypher)
+        await neo4j_service.execute_cypher(semantic_cypher)
         
     print("Seed process complete. Data is now semantically isolated.")
 
 if __name__ == "__main__":
-    seed()
+    asyncio.run(seed())

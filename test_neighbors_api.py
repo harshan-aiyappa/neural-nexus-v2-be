@@ -7,7 +7,7 @@ async def verify_neighbors():
     # Based on graph.py/folders.py being routers, they usually get prefixed in main.py
     # Let's verify if /api/folders or /folders is correct. 
     # test_features.py uses /folders.
-    base_url = "http://10.10.20.122:8000"
+    base_url = "http://10.10.20.144:8000"
     
     async with httpx.AsyncClient() as client:
         try:

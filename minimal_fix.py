@@ -4,10 +4,10 @@ from pymongo import MongoClient
 from bson import ObjectId
 
 # Hardcoded for speed and safety
-NEO4J_URI = "bolt://10.10.20.122:7687"
+NEO4J_URI = "bolt://10.10.20.144:7687"
 NEO4J_USER = "neo4j"
 NEO4J_PASS = "harsh221996"
-MONGO_URI = "mongodb://10.10.20.122:27017"
+MONGO_URI = "mongodb://10.10.20.144:27017"
 
 VERIFICATION_FOLDER_ID = "69b14d419ffff51bab9e15e8"
 

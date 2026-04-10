@@ -11,14 +11,14 @@ async def check_backend():
     print("\n--- Checking Backend API ---")
     async with httpx.AsyncClient() as client:
         try:
-            resp = await client.get("http://10.10.20.122:8000/")
-            print(f"Backend Health (10.10.20.122:8000): {resp.status_code} - OK")
+            resp = await client.get("http://10.10.20.144:8000/")
+            print(f"Backend Health (10.10.20.144:8000): {resp.status_code} - OK")
         except Exception as e:
             print(f"Backend check failed: {e}")
 
 async def check_mongodb():
     print("\n--- Checking MongoDB ---")
-    uri = os.getenv("MONGODB_URI", "mongodb://10.10.20.122:27017")
+    uri = os.getenv("MONGODB_URI", "mongodb://10.10.20.144:27017")
     try:
         client = AsyncIOMotorClient(uri, serverSelectionTimeoutMS=2000)
         # Try a ping
@@ -34,7 +34,7 @@ async def check_mongodb():
 
 def check_neo4j():
     print("\n--- Checking Neo4j ---")
-    uri = os.getenv("NEO4J_URI", "bolt://10.10.20.122:7687")
+    uri = os.getenv("NEO4J_URI", "bolt://10.10.20.144:7687")
     user = os.getenv("NEO4J_USER", "neo4j")
     password = os.getenv("NEO4J_PASSWORD")
     try:
