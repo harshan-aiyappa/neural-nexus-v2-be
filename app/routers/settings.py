@@ -93,7 +93,7 @@ async def get_system_status():
 
     # 3. Redis Check
     try:
-        redis_url = os.getenv("REDIS_URL", "redis://10.10.20.122:6379/0")
+        redis_url = os.getenv("REDIS_URL", "redis://10.10.20.144:6379/0")
         client = redis.from_url(redis_url, socket_timeout=1)
         client.ping()
         status["redis"] = "ACTIVE"
