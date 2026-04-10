@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 class CacheService:
     def __init__(self):
-        self.redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+        self.redis_url = os.getenv("REDIS_URL", "redis://10.10.20.144:6379/0")
         try:
             self.client = redis.from_url(self.redis_url, decode_responses=True)
             self.client.ping()

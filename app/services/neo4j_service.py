@@ -8,7 +8,7 @@ from app.services.audit_service import audit_service
 
 class Neo4jService:
     def __init__(self):
-        uri = os.getenv("NEO4J_URI", "bolt://localhost:7687")
+        uri = os.getenv("NEO4J_URI", "bolt://10.10.20.144:7687")
         user = os.getenv("NEO4J_USER", "neo4j")
         password = os.getenv("NEO4J_PASSWORD")
         self.driver = AsyncGraphDatabase.driver(uri, auth=(user, password))

@@ -8,10 +8,31 @@ load_dotenv()
 
 class MongoDBService:
     def __init__(self):
-        self.uri = os.getenv("MONGODB_URI", "mongodb://localhost:27017")
+        self.uri = os.getenv("MONGODB_URI", "mongodb://10.10.20.144:27017")
         self.client = AsyncIOMotorClient(self.uri)
         self.db = self.client.get_database("neural_nexus_v2")
         db_logger.info(f"MongoDB Service initialized on {self.uri}")
+
+    async def setup_indices(self):
+        """Configure MongoDB indices for uniqueness and query performance."""
+        db_logger.info("Configuring MongoDB indices...")
+        try:
+            # 1. Users: Unique email
+            await self.db.get_collection("users").create_index("email", unique=True)
+            
+            # 2. Folders: Unique name
+            await self.db.get_collection("folders").create_index("name", unique=True)
+            
+            # 3. Audit Logs: Performance indices
+            await self.db.get_collection("audit_logs").create_index([("timestamp", -1)])
+            await self.db.get_collection("audit_logs").create_index("user_email")
+            
+            # 4. Documents: Fast lookup by filename
+            await self.db.get_collection("documents").create_index("metadata.filename")
+            
+            db_logger.info("MongoDB indices configured successfully.")
+        except Exception as e:
+            db_logger.error(f"Failed to configure MongoDB indices: {e}")
 
     async def save_document(self, content: str, metadata: dict):
         """Save raw document content and metadata before graph extraction."""

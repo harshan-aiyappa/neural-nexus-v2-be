@@ -30,7 +30,7 @@ except Exception:
 # Robust bcrypt/passlib setup for Windows Dev Env
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 # Using the network IP for tokenUrl as requested. auto_error=False allows the IP bypass to work without a token.
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="http://10.10.20.122:8000/api/auth/login", auto_error=False)
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="http://10.10.20.144:8000/api/auth/login", auto_error=False)
 
 class TokenData(BaseModel):
     sub: Optional[str] = None
@@ -63,10 +63,11 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
             return False
 
 def get_password_hash(password: str) -> str:
+    # Use direct bcrypt to avoid passlib logic bug with newer bcrypt versions
     p_bytes = password.encode('utf-8')
-    if len(p_bytes) > 72:
-        p_bytes = p_bytes[:72]
-    return pwd_context.hash(p_bytes)
+    salt = bcrypt.gensalt()
+    hashed = bcrypt.hashpw(p_bytes, salt)
+    return hashed.decode('utf-8')
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     to_encode = data.copy()
@@ -81,7 +82,7 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
 async def get_current_user(request: Request, token: Optional[str] = Depends(oauth2_scheme)):
     # Security Bypass for specific local network systems
     client_ip = request.client.host
-    allowed_ips = ["127.0.0.1", "10.10.20.199", "10.10.20.86", "10.10.20.122"]
+    allowed_ips = ["10.10.20.144", "10.10.20.199", "10.10.20.86", "10.10.20.144"]
     
     if client_ip in allowed_ips:
         # Return a mock research user with full permissions

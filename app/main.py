@@ -21,7 +21,7 @@ async def lifespan(app: FastAPI):
     services_status = []
     
     # 1. Verify Neo4j
-    neo4j_uri = os.getenv("NEO4J_URI", "bolt://localhost:7687")
+    neo4j_uri = os.getenv("NEO4J_URI", "bolt://127.0.0.1:7687")
     try:
         await neo4j_service.verify_connectivity()
         await neo4j_service.setup_constraints()
@@ -30,16 +30,18 @@ async def lifespan(app: FastAPI):
         services_status.append(("Neo4j", neo4j_uri, f"❌ FAILED ({str(e)[:30]}...)"))
 
     # 2. Verify MongoDB
-    mongo_uri = os.getenv("MONGODB_URI", "mongodb://localhost:27017")
+    mongo_uri = os.getenv("MONGODB_URI", "mongodb://10.10.20.144:27017")
     try:
         import asyncio
         await asyncio.wait_for(mongo_service.client.admin.command('ping'), timeout=2.0)
+        # Initialize indices for fresh Mac installation
+        await mongo_service.setup_indices()
         services_status.append(("MongoDB", mongo_uri, "✅ OK"))
     except Exception as e:
         services_status.append(("MongoDB", mongo_uri, f"❌ FAILED ({str(e)[:30]}...)"))
 
     # 3. Verify Redis
-    redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+    redis_url = os.getenv("REDIS_URL", "redis://10.10.20.144:6379/0")
     try:
         r = redis.from_url(redis_url, socket_timeout=2)
         r.ping()
@@ -126,7 +128,7 @@ app = FastAPI(
 # CORS Configuration
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["http://10.10.20.144:5173", "http://localhost:5173", "http://127.0.0.1:5173"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
