@@ -4,7 +4,7 @@ import re
 from typing import Dict, Any, List, Optional, TypedDict
 from langgraph.graph import StateGraph, END
 from app.services.neo4j_service import neo4j_service
-from app.services.gemini_service import gemini_service
+from app.services.ollama_service import ollama_service
 from app.services.gds_service import gds_service
 from app.services.chat.prompts import get_enhanced_rag_system_prompt
 from langchain_core.messages import BaseMessage
@@ -117,7 +117,7 @@ RULES:
 CYPHER QUERY:"""
         
         try:
-            cypher = await gemini_service.generate_response(user_prompt=user_prompt, system_prompt=system_prompt)
+            cypher = await ollama_service.generate_response(user_prompt=user_prompt, system_prompt=system_prompt)
             cypher = cypher.strip().replace("```cypher", "").replace("```", "").strip()
             
             if "NONE" in cypher.upper() or not any(x in cypher.upper() for x in ["MATCH", "CALL", "WITH"]):
@@ -157,7 +157,7 @@ CYPHER QUERY:"""
         context = ""
         try:
             # 1. Attempt Vector Search if embeddings available
-            embedding = await gemini_service.generate_embeddings(query)
+            embedding = await ollama_service.generate_embeddings(query)
             if embedding:
                 vector_query = f"""
                 MATCH (n{folder_filter})
@@ -252,7 +252,7 @@ USER QUERY: {state['query']}
 (Respond ONLY based on context. If context doesn't answer it, state what you DO see.)
 """
         try:
-            answer = await gemini_service.generate_response(user_prompt=user_prompt, system_prompt=system_prompt)
+            answer = await ollama_service.generate_response(user_prompt=user_prompt, system_prompt=system_prompt)
             return {"answer": answer, "grounding_score": 1.0, "search_mode": "hybrid_advanced", "built_context": combined_context}
         except Exception as e:
             logger.error(f"Synthesis failed: {e}")
@@ -264,7 +264,7 @@ USER QUERY: {state['query']}
         try:
             # 1. Prepare data
             text_to_embed = f"User: {state['query']}\nAI: {state['answer']}"
-            embedding = await gemini_service.generate_embeddings(text_to_embed)
+            embedding = await ollama_service.generate_embeddings(text_to_embed)
             
             chat_data = {
                 "message": state['query'],
