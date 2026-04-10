@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 async def cleanup_duplicates():
-    uri = os.getenv("MONGODB_URI", "mongodb://localhost:27017")
+    uri = os.getenv("MONGODB_URI", "mongodb://10.10.20.144:27017")
     client = AsyncIOMotorClient(uri)
     db = client.get_database("neural_nexus_v2")
     collection = db.get_collection("folders")

@@ -3,7 +3,7 @@ import os
 from neo4j import AsyncGraphDatabase
 
 async def migrate_labels():
-    uri = os.getenv("NEO4J_URI", "bolt://localhost:7687")
+    uri = os.getenv("NEO4J_URI", "bolt://10.10.20.144:7687")
     user = os.getenv("NEO4J_USER", "neo4j")
     password = os.getenv("NEO4J_PASSWORD")
     

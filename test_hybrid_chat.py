@@ -3,7 +3,7 @@ import httpx
 import json
 
 async def test_hybrid_chat():
-    base_url = "http://localhost:8000/api"
+    base_url = "http://10.10.20.144:8000/api"
     
     chat_req = {
         "message": "What can you tell me about the plant Tulasi?",

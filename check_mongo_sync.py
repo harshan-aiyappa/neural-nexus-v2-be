@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 def check_mongo():
-    uri = os.getenv("MONGODB_URI", "mongodb://localhost:27017")
+    uri = os.getenv("MONGODB_URI", "mongodb://10.10.20.144:27017")
     try:
         client = MongoClient(uri, serverSelectionTimeoutMS=5000)
         db = client.get_database("neural_nexus_v2")

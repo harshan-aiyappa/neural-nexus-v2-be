@@ -6,8 +6,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 def audit():
-    mongo_uri = os.getenv("MONGODB_URI", "mongodb://localhost:27017")
-    neo4j_uri = os.getenv("NEO4J_URI", "bolt://localhost:7687")
+    mongo_uri = os.getenv("MONGODB_URI", "mongodb://10.10.20.144:27017")
+    neo4j_uri = os.getenv("NEO4J_URI", "bolt://10.10.20.144:7687")
     neo4j_user = os.getenv("NEO4J_USER", "neo4j")
     neo4j_password = os.getenv("NEO4J_PASSWORD")
 

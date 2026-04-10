@@ -8,7 +8,7 @@ load_dotenv()
 
 async def check_databases():
     # Check MongoDB
-    mongo_uri = os.getenv("MONGODB_URI", "mongodb://localhost:27017")
+    mongo_uri = os.getenv("MONGODB_URI", "mongodb://10.10.20.144:27017")
     client = AsyncIOMotorClient(mongo_uri)
     db = client.get_database("neural_nexus_v2")
     
@@ -27,7 +27,7 @@ async def check_databases():
             print(f"Sample from {coll_name}: {sample}")
 
     # Check Neo4j
-    neo4j_uri = os.getenv("NEO4J_URI", "bolt://localhost:7687")
+    neo4j_uri = os.getenv("NEO4J_URI", "bolt://10.10.20.144:7687")
     neo4j_user = os.getenv("NEO4J_USER", "neo4j")
     neo4j_password = os.getenv("NEO4J_PASSWORD")
     
