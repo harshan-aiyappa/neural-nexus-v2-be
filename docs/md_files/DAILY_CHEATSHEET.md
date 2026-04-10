@@ -115,7 +115,7 @@ git branch -a                # See all branches
 
 | Service  | URL                          | Start Command                                                |
 | :------- | :--------------------------- | :----------------------------------------------------------- |
-| Backend  | `http://10.10.20.122:8000` | `uvicorn app.main:app --reload --host 0.0.0.0 --port 8000` |
-| Frontend | `http://10.10.20.122:5173` | `npm run dev`                                              |
-| Redis UI | `http://10.10.20.122:8081` | Docker (already running)                                     |
-| Neo4j    | `http://10.10.20.122:7474` | Running on server                                            |
+| Backend  | `http://10.10.20.144:8000` | `uvicorn app.main:app --reload --host 0.0.0.0 --port 8000` |
+| Frontend | `http://10.10.20.144:5173` | `npm run dev`                                              |
+| Redis UI | `http://10.10.20.144:8081` | Docker (already running)                                     |
+| Neo4j    | `http://10.10.20.144:7474` | Running on server                                            |

@@ -66,9 +66,9 @@ git push origin feat/namitha/nexus-ai-chat
 Share the same `.env` values. Do NOT commit `.env` to git.
 
 ```env
-MONGODB_URI=mongodb://10.10.20.122:27017
-NEO4J_URI=bolt://10.10.20.122:7687
-REDIS_URL=redis://10.10.20.122:6379/0
+MONGODB_URI=mongodb://10.10.20.144:27017
+NEO4J_URI=bolt://10.10.20.144:7687
+REDIS_URL=redis://10.10.20.144:6379/0
 GEMINI_API_KEY=<your key>
 ```
 
@@ -78,8 +78,8 @@ GEMINI_API_KEY=<your key>
 
 | Service       | Address                        | Notes           |
 | :------------ | :----------------------------- | :-------------- |
-| Backend API   | `http://10.10.20.122:8000`     | FastAPI         |
-| Frontend      | `http://10.10.20.122:5173`     | Vite dev server |
-| Redis UI      | `http://10.10.20.122:8081`     | Redis Commander |
-| Neo4j Browser | `http://10.10.20.122:7474`     |                 |
-| MongoDB       | `mongodb://10.10.20.122:27017` |                 |
+| Backend API   | `http://10.10.20.144:8000`     | FastAPI         |
+| Frontend      | `http://10.10.20.144:5173`     | Vite dev server |
+| Redis UI      | `http://10.10.20.144:8081`     | Redis Commander |
+| Neo4j Browser | `http://10.10.20.144:7474`     |                 |
+| MongoDB       | `mongodb://10.10.20.144:27017` |                 |
